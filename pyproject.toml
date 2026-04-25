@@ -1,0 +1,36 @@
+[project]
+name = "dynamicalgorithmselection2"
+version = "0.1.0"
+description = "RL-based Dynamic Algorithm Selection using Stable Baselines 3 and Gymnasium"
+authors = [{ name = "wniec", email = "niecwladek@gmail.com" }]
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "pypop7>=0.0.82,<0.0.83",
+    "coco-experiment>=2.8.1,<3",
+    "cocopp>=2.8.0,<3",
+    "stable-baselines3>=2.3.0",
+    "gymnasium>=0.29.0",
+    "tqdm>=4.67.1,<5",
+    "wandb>=0.22.2,<0.23",
+    "numpy>=1.20.0,<2.0",
+    "pflacco>=1.0.0",
+    "pandas>=2.0.3",
+    "matplotlib>=3.8,<4",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["das"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "ruff>=0.14.5",
+]
+
+[project.scripts]
+das-train = "train:main"
+das-eval = "evaluate:main"
