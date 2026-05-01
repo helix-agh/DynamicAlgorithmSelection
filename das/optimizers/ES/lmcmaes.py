@@ -221,7 +221,7 @@ class LMCMAES(ES):
             return np.asarray(val).shape == _shapes[key]
 
         ws = {k: kwargs.get(k) if _valid(k, kwargs.get(k)) else None for k in _shapes}
-        if x is not None and y is not None and len(x) >= 1:
+        if x is not None and y is not None and len(x) >= self.n_individuals:
             idx = np.argsort(y)[: self.n_individuals]
             x_sub, y_sub = x[idx], y[idx]
             ws["mean"] = x_sub.mean(axis=0)

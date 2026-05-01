@@ -2,3 +2,6 @@ models/
 results/
 .venv/
 .claude/
+.idea/
+__pycache__/
+*/__pycache__/

@@ -6,6 +6,7 @@ Add new algorithm classes here and they become selectable via the CLI.
 from das.optimizers.PSO import SPSO, SPSOL, IPSO, CPSO
 from das.optimizers.DE import JDE21, MADDE, NL_SHADE_RSP
 from das.optimizers.ES import CMAES, LMCMAES
+from das.optimizers.BO import GPBO_EI, GPBO_UCB
 
 PORTFOLIO: dict = {
     "SPSO": SPSO,
@@ -17,6 +18,8 @@ PORTFOLIO: dict = {
     "NL_SHADE_RSP": NL_SHADE_RSP,
     "CMAES": CMAES,
     "LMCMAES": LMCMAES,
+    "GPBO_EI": GPBO_EI,
+    "GPBO_UCB": GPBO_UCB,
 }
 
 

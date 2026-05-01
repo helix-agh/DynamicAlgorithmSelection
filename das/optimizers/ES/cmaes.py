@@ -184,8 +184,15 @@ class CMAES(ES):
         self._warm_start = {
             k: kwargs.get(k) if _valid(k, kwargs.get(k)) else None for k in _shapes
         }
-        self._warm_start["x"] = x
-        self._warm_start["y"] = y
+        # Normalise x/y to exactly n_individuals rows so iterate() z-indexing is safe.
+        # Too few points → start fresh; too many → keep best n_individuals.
+        if x is not None and y is not None and len(x) >= self.n_individuals:
+            idx = np.argsort(y)[: self.n_individuals]
+            self._warm_start["x"] = x[idx]
+            self._warm_start["y"] = y[idx]
+        else:
+            self._warm_start["x"] = None
+            self._warm_start["y"] = None
         if best_x is not None:
             self.best_so_far_x = np.copy(best_x)
         if best_y is not None:
