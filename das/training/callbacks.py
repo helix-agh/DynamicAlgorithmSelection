@@ -18,6 +18,7 @@ from stable_baselines3.common.vec_env import VecEnv
 
 try:
     import wandb
+
     HAS_WANDB = True
 except ImportError:
     HAS_WANDB = False
@@ -27,7 +28,10 @@ except ImportError:
 # AOCC metric                                                          #
 # ------------------------------------------------------------------ #
 
-def _aocc(fitness_history: list[tuple[int, float]], max_fe: int, optimum: float) -> float:
+
+def _aocc(
+    fitness_history: list[tuple[int, float]], max_fe: int, optimum: float
+) -> float:
     """Area Over the Convergence Curve, normalised to [0, 1]."""
     lb, ub = -8.0, 8.0
     area = 0.0
@@ -48,6 +52,7 @@ def _aocc(fitness_history: list[tuple[int, float]], max_fe: int, optimum: float)
 # Result persistence                                                   #
 # ------------------------------------------------------------------ #
 
+
 def dump_result(name: str, problem_id: str, best_y: float, aocc: float):
     os.makedirs("results", exist_ok=True)
     with open(os.path.join("results", f"{name}.jsonl"), "a") as f:
@@ -57,6 +62,7 @@ def dump_result(name: str, problem_id: str, best_y: float, aocc: float):
 # ------------------------------------------------------------------ #
 # Weights & Biases callback                                           #
 # ------------------------------------------------------------------ #
+
 
 class WandbCallback(BaseCallback):
     """Logs SB3 training metrics to an active wandb run."""
@@ -76,6 +82,7 @@ class WandbCallback(BaseCallback):
 # ------------------------------------------------------------------ #
 # Evaluation callback                                                  #
 # ------------------------------------------------------------------ #
+
 
 class DASEvalCallback(BaseCallback):
     """Periodically evaluates the current policy on held-out BBOB problems.
@@ -136,4 +143,6 @@ class DASEvalCallback(BaseCallback):
         self.logger.record("eval/mean_best_y", mean_best)
 
         if self.verbose:
-            print(f"[EvalCallback] step={self.num_timesteps}  mean_best_y={mean_best:.4e}")
+            print(
+                f"[EvalCallback] step={self.num_timesteps}  mean_best_y={mean_best:.4e}"
+            )

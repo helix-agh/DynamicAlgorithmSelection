@@ -56,6 +56,7 @@ class DASEnv(gym.Env):
         checkpoint_division_base: float = 1.0,
         reward_option: int = 1,
         n_individuals: int = 100,
+        seed: int | None = None,
     ):
         super().__init__()
         self.problem_ids = problem_ids
@@ -66,11 +67,14 @@ class DASEnv(gym.Env):
         self.cdb = checkpoint_division_base
         self.reward_option = reward_option
         self.n_individuals = n_individuals
+        self._seed = seed
 
         n_actions = len(optimizers)
         obs_dim = observation_dim(n_actions)
 
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(obs_dim,), dtype=np.float32)
+        self.observation_space = spaces.Box(
+            low=-np.inf, high=np.inf, shape=(obs_dim,), dtype=np.float32
+        )
         self.action_space = spaces.Discrete(n_actions)
 
         # Episode state – reset() initialises these
@@ -81,7 +85,7 @@ class DASEnv(gym.Env):
         self._checkpoints: np.ndarray | None = None
         self._checkpoint_idx = 0
 
-        self._optimizer_state: dict = {}   # passed between sub-optimizers for warm-starting
+        self._optimizer_state: dict = {}  # passed between sub-optimizers for warm-starting
         self._x_history: np.ndarray | None = None
         self._y_history: np.ndarray | None = None
 
@@ -105,7 +109,9 @@ class DASEnv(gym.Env):
         self._problem = self.suite.get_problem(problem_id)
         dim = self._problem.dimension
         self._max_fe = self.fe_multiplier * dim
-        self._checkpoints = get_checkpoints(self.n_checkpoints, self._max_fe, self.n_individuals, self.cdb)
+        self._checkpoints = get_checkpoints(
+            self.n_checkpoints, self._max_fe, self.n_individuals, self.cdb
+        )
 
         # Reset episode bookkeeping
         self._n_fe = 0
@@ -137,8 +143,7 @@ class DASEnv(gym.Env):
         self._checkpoint_idx += 1
 
         terminated = (
-            self._checkpoint_idx >= self.n_checkpoints
-            or self._n_fe >= self._max_fe
+            self._checkpoint_idx >= self.n_checkpoints or self._n_fe >= self._max_fe
         )
         reward = compute_reward(
             self._best_y,
@@ -176,6 +181,14 @@ class DASEnv(gym.Env):
             "best_so_far_y": self._best_y,
             "verbose": False,
         }
+        # Derive a deterministic seed for pypop7's default_rng, which is
+        # independent of np.random and must be seeded explicitly.
+        if self._seed is not None:
+            options["seed_rng"] = (
+                self._seed * 1_000_000
+                + self._problem_idx * 1_000
+                + self._checkpoint_idx
+            ) % (2**31)
         optimizer = optimizer_class(problem_config, options)
         optimizer.n_function_evaluations = self._n_fe
 
@@ -233,8 +246,16 @@ class DASEnv(gym.Env):
 
         # Accumulate population history for ELA
         if x_hist is not None and len(x_hist) > 0:
-            self._x_history = x_hist if self._x_history is None else np.concatenate([self._x_history, x_hist])
-            self._y_history = y_hist if self._y_history is None else np.concatenate([self._y_history, y_hist])
+            self._x_history = (
+                x_hist
+                if self._x_history is None
+                else np.concatenate([self._x_history, x_hist])
+            )
+            self._y_history = (
+                y_hist
+                if self._y_history is None
+                else np.concatenate([self._y_history, y_hist])
+            )
 
     def _build_observation(self) -> np.ndarray:
         return compute_observation(

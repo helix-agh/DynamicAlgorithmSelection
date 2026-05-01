@@ -8,15 +8,15 @@ from das.optimizers.DE import JDE21, MADDE, NL_SHADE_RSP
 from das.optimizers.ES import CMAES, LMCMAES
 
 PORTFOLIO: dict = {
-    "SPSO":        SPSO,
-    "SPSOL":       SPSOL,
-    "IPSO":        IPSO,
-    "CPSO":        CPSO,
-    "JDE21":       JDE21,
-    "MADDE":       MADDE,
+    "SPSO": SPSO,
+    "SPSOL": SPSOL,
+    "IPSO": IPSO,
+    "CPSO": CPSO,
+    "JDE21": JDE21,
+    "MADDE": MADDE,
     "NL_SHADE_RSP": NL_SHADE_RSP,
-    "CMAES":       CMAES,
-    "LMCMAES":     LMCMAES,
+    "CMAES": CMAES,
+    "LMCMAES": LMCMAES,
 }
 
 
@@ -27,5 +27,7 @@ def get_portfolio(names: list[str]) -> list:
     """
     unknown = [n for n in names if n not in PORTFOLIO]
     if unknown:
-        raise ValueError(f"Unknown optimizer(s): {unknown}. Available: {list(PORTFOLIO)}")
+        raise ValueError(
+            f"Unknown optimizer(s): {unknown}. Available: {list(PORTFOLIO)}"
+        )
     return [PORTFOLIO[n] for n in names]

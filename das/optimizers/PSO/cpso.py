@@ -17,10 +17,18 @@ class CPSO(PSO):
     def __init__(self, problem: dict, options: dict):
         options = dict(options)
         options.setdefault("cognition", 1.49)
-        options.setdefault("society",   1.49)
+        options.setdefault("society", 1.49)
         super().__init__(problem, options)
         # CPSO inertia decays from 1.0 to 0.0, indexed per (generation × ndim)
-        max_gens = max(1, int(np.ceil(self.max_function_evaluations / (self.n_individuals * self.ndim_problem))))
+        max_gens = max(
+            1,
+            int(
+                np.ceil(
+                    self.max_function_evaluations
+                    / (self.n_individuals * self.ndim_problem)
+                )
+            ),
+        )
         self._w = 1.0 - (np.arange(max_gens) + 1.0) / max_gens
 
     def iterate(self, v, x, y, p_x, p_y, n_x):
@@ -37,11 +45,15 @@ class CPSO(PSO):
                 v[i, j] = (
                     w * v[i, j]
                     + self.cognition * cog * (p_x[i, j] - x[i, j])
-                    + self.society   * soc * (n_x[i, j] - x[i, j])
+                    + self.society * soc * (n_x[i, j] - x[i, j])
                 )
                 v[i, j] = np.clip(v[i, j], self._min_v[j], self._max_v[j])
                 x[i, j] += v[i, j]
-                candidate = np.copy(self.best_so_far_x) if self.best_so_far_x is not None else np.copy(x[i])
+                candidate = (
+                    np.copy(self.best_so_far_x)
+                    if self.best_so_far_x is not None
+                    else np.copy(x[i])
+                )
                 candidate[j] = x[i, j]
                 y[i] = self._evaluate_fitness(candidate)
                 if y[i] < p_y[i]:

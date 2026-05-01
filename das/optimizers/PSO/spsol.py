@@ -10,7 +10,7 @@ class SPSOL(PSO):
     its left neighbour, itself, and its right neighbour."""
 
     def _social_guide(self, i, p_x, p_y, n_x):
-        left  = (i - 1) % self.n_individuals
+        left = (i - 1) % self.n_individuals
         right = (i + 1) % self.n_individuals
-        ring  = [left, i, right]
+        ring = [left, i, right]
         return p_x[ring[int(np.argmin(p_y[ring]))]]

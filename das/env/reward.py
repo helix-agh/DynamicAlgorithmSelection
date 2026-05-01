@@ -8,7 +8,9 @@ so rewards are comparable across different problem instances.
 import numpy as np
 
 
-def _improvement_ratio(new_best_y: float, old_best_y: float, initial_range: tuple[float, float]) -> float:
+def _improvement_ratio(
+    new_best_y: float, old_best_y: float, initial_range: tuple[float, float]
+) -> float:
     scale = initial_range[1] - initial_range[0]
     return (old_best_y - new_best_y) / (scale + 1e-10)
 
@@ -25,7 +27,9 @@ def reward_linear(new_best_y, old_best_y, initial_range, is_final=False):
     """Linear improvement clipped to [0, 1] (original r2)."""
     if old_best_y == float("inf"):
         return float(np.log(initial_range[1] - initial_range[0] + 1e-10))
-    return float(np.clip(_improvement_ratio(new_best_y, old_best_y, initial_range), 0.0, 1.0))
+    return float(
+        np.clip(_improvement_ratio(new_best_y, old_best_y, initial_range), 0.0, 1.0)
+    )
 
 
 def reward_sparse(new_best_y, old_best_y, initial_range, is_final=False):
@@ -45,7 +49,12 @@ def reward_binary(new_best_y, old_best_y, initial_range, is_final=False):
     return 1.0 if ratio >= 1e-3 else 0.0
 
 
-REWARD_FNS = {1: reward_log_scaled, 2: reward_linear, 3: reward_sparse, 4: reward_binary}
+REWARD_FNS = {
+    1: reward_log_scaled,
+    2: reward_linear,
+    3: reward_sparse,
+    4: reward_binary,
+}
 
 
 def compute_reward(
@@ -57,5 +66,7 @@ def compute_reward(
 ) -> float:
     fn = REWARD_FNS.get(option)
     if fn is None:
-        raise ValueError(f"Unknown reward option {option}. Choose from {list(REWARD_FNS)}")
+        raise ValueError(
+            f"Unknown reward option {option}. Choose from {list(REWARD_FNS)}"
+        )
     return fn(new_best_y, old_best_y, initial_range, is_final)

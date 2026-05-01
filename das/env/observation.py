@@ -66,7 +66,9 @@ def compute_ela_features(x: np.ndarray, y: np.ndarray) -> np.ndarray:
         x_norm_arr = (x - x.mean()) / (x.std() + 1e-8)
         y_norm_arr = (y - y.mean()) / (y.std() + 1e-8)
 
-        x_df = pd.DataFrame(x_norm_arr, columns=[f"x_{i}" for i in range(x_norm_arr.shape[1])])
+        x_df = pd.DataFrame(
+            x_norm_arr, columns=[f"x_{i}" for i in range(x_norm_arr.shape[1])]
+        )
         y_series = pd.Series(y_norm_arr)
 
         is_unique = ~x_df.duplicated()
@@ -85,7 +87,14 @@ def compute_ela_features(x: np.ndarray, y: np.ndarray) -> np.ndarray:
         if (y**2).sum() > 0 and np.var(y_series) > 1e-8:
             ela_distr = calculate_ela_distribution(x_df, y_series)
         else:
-            ela_distr = {k: 0.0 for k in ("ela_distr.skewness", "ela_distr.kurtosis", "ela_distr.number_of_peaks")}
+            ela_distr = {
+                k: 0.0
+                for k in (
+                    "ela_distr.skewness",
+                    "ela_distr.kurtosis",
+                    "ela_distr.number_of_peaks",
+                )
+            }
 
         all_feats = {**meta, **nbc, **disp, **ic, **ela_distr}
         return np.array([all_feats[k] for k in ELA_FEATURE_KEYS], dtype=np.float32)
@@ -115,7 +124,9 @@ def compute_action_history_features(
         last_idx = choices_history[-1]
         last_action[last_idx] = 1.0
 
-        counts = np.array([choices_history.count(j) for j in range(n_actions)], dtype=np.float32)
+        counts = np.array(
+            [choices_history.count(j) for j in range(n_actions)], dtype=np.float32
+        )
         frequencies = counts / len(choices_history)
 
         run = 0
@@ -127,13 +138,19 @@ def compute_action_history_features(
         same_action_count = run / max(n_checkpoints, 1)
 
         log_n = np.log(n_actions) if n_actions > 1 else 1.0
-        entropy = float(-(frequencies * np.nan_to_num(np.log(frequencies + 1e-12))).sum() / log_n)
+        entropy = float(
+            -(frequencies * np.nan_to_num(np.log(frequencies + 1e-12))).sum() / log_n
+        )
 
     dim_norm = ndim_problem / MAX_DIM
-    return np.concatenate([last_action, [same_action_count], frequencies, [entropy, dim_norm]])
+    return np.concatenate(
+        [last_action, [same_action_count], frequencies, [entropy, dim_norm]]
+    )
 
 
-def compute_progress_features(n_fe: int, max_fe: int, stagnation_count: int) -> np.ndarray:
+def compute_progress_features(
+    n_fe: int, max_fe: int, stagnation_count: int
+) -> np.ndarray:
     """Encode optimization progress as a 2-element vector."""
     return np.array([n_fe / max_fe, stagnation_count / max_fe], dtype=np.float32)
 
@@ -155,7 +172,9 @@ def compute_observation(
     else:
         ela = np.zeros(ELA_DIM, dtype=np.float32)
 
-    action_hist = compute_action_history_features(choices_history, n_actions, n_checkpoints, ndim_problem)
+    action_hist = compute_action_history_features(
+        choices_history, n_actions, n_checkpoints, ndim_problem
+    )
     progress = compute_progress_features(n_fe, max_fe, stagnation_count)
 
     obs = np.concatenate([ela, action_hist, progress])

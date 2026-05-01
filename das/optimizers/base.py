@@ -48,7 +48,11 @@ class SubOptimizer(_Pypop7Base):
 
     def _evaluate_fitness(self, x: np.ndarray, args=None) -> float:
         t0 = time.time()
-        y = self.fitness_function(x) if args is None else self.fitness_function(x, args=args)
+        y = (
+            self.fitness_function(x)
+            if args is None
+            else self.fitness_function(x, args=args)
+        )
         self.time_function_evaluations += time.time() - t0
         self.n_function_evaluations += 1
         y_val = float(y)
@@ -104,7 +108,9 @@ class SubOptimizer(_Pypop7Base):
         return dict(self._warm_start)
 
 
-def get_checkpoints(n_checkpoints: int, max_fe: int, n_individuals: int, cdb: float) -> np.ndarray:
+def get_checkpoints(
+    n_checkpoints: int, max_fe: int, n_individuals: int, cdb: float
+) -> np.ndarray:
     """Compute exponentially-spaced checkpoint FE targets.
 
     cdb == 1.0  → uniform spacing
