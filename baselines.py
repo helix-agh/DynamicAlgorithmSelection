@@ -45,7 +45,7 @@ from das.env.das_env import DASEnv
 from das.optimizers.portfolio import get_portfolio
 from das.utils import set_seed
 from das.env.bbob_splits import ALL_DIMS, get_train_test_split
-from train import load_global_optima
+from das.training.common import load_global_optima
 
 warnings.filterwarnings("ignore")
 
