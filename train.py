@@ -1,126 +1,55 @@
-"""Training script for DAS using Stable Baselines 3 PPO.
+"""Unified training entry point for all DAS agents.
 
 Usage
 -----
-    # Regular training (single train/test split):
-    python train.py <name> [options]
+    python train.py ppo     <name> [options]
+    python train.py rl-das  <name> [options]
+    python train.py exp-das <name> [options]
 
-    # Cross-validation (LOIO = 15 folds, LOPO = 24 folds):
-    python train.py <name> --cv-mode LOIO [options]
-    python train.py <name> --cv-mode LOPO [options]
-    python train.py <name> --cv-mode LOPO --folds 0 1 2  # specific folds only
-
-Regular mode outputs
---------------------
+ppo outputs
+-----------
     models/<name>.zip
     models/<name>_vecnorm.pkl
+    results/<name>_eval.jsonl          (with --eval)
 
-CV mode outputs (per fold + summary)
--------------------------------------
-    models/<name>_cv_<fold_tag>.zip
-    models/<name>_cv_<fold_tag>_vecnorm.pkl
-    results/<name>_cv_<fold_tag>.jsonl
+    CV mode (--cv-mode LOIO|LOPO):
+    models/<name>_cv_<fold>.zip  +  _vecnorm.pkl
+    results/<name>_cv_<fold>.jsonl
     results/<name>_cv_summary.jsonl
+
+rl-das outputs
+--------------
+    models/<name>_final.pt
+    models/<name>_epoch<N>.pt
+    models/<name>_train_log.jsonl
+    results/<name>_eval.jsonl
+
+exp-das outputs
+---------------
+    models/<name>_best.pt  /  _final.pt  /  _ep<N>.pt
+    models/<name>_train_log.jsonl
+    results/<name>_eval.jsonl
 """
 
 import argparse
 import json
 import os
 import warnings
-from itertools import product
+from pathlib import Path
 
 import numpy as np
-from stable_baselines3 import PPO
-from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.vec_env import VecNormalize, SubprocVecEnv
-
 from tqdm import tqdm
 
+from das.env.bbob_splits import ALL_DIMS, get_train_test_split, get_cv_folds
 from das.env.das_env import DASEnv
 from das.optimizers.portfolio import get_portfolio
-from das.training.callbacks import WandbCallback, DASEvalCallback
 from das.utils import set_seed
 
 warnings.filterwarnings("ignore")
 
-# ------------------------------------------------------------------ #
-# BBOB problem sets                                                    #
-# ------------------------------------------------------------------ #
-
-ALL_DIMS = [2, 3, 5, 10, 20, 40]
-ALL_FUNCTIONS = set(range(1, 25))
-INSTANCE_IDS = [1, 2, 3, 4, 5, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80]
-EASY_TRAIN_FUNCTIONS = {4, *range(6, 15), 18, 19, 20, 22, 23, 24}
-
-
-def build_problem_ids(
-    functions: set[int],
-    dims: list[int],
-    instances: list[int] | None = None,
-) -> list[str]:
-    insts = instances if instances is not None else INSTANCE_IDS
-    return [
-        f"bbob_f{f:03d}_i{i:02d}_d{d:02d}"
-        for i, f, d in product(insts, sorted(functions), dims)
-    ]
-
-
-def get_train_test_split(mode: str, dims: list[int]) -> tuple[list[str], list[str]]:
-    if mode == "easy":
-        train_fns = EASY_TRAIN_FUNCTIONS
-        test_fns = ALL_FUNCTIONS - EASY_TRAIN_FUNCTIONS
-    elif mode == "hard":
-        train_fns = ALL_FUNCTIONS - EASY_TRAIN_FUNCTIONS
-        test_fns = EASY_TRAIN_FUNCTIONS
-    else:  # LOIO – random 2/3 split on problem IDs
-        all_ids = build_problem_ids(ALL_FUNCTIONS, dims)
-        rng = np.random.default_rng()
-        rng.shuffle(all_ids)
-        split = 2 * len(all_ids) // 3
-        return all_ids[:split], all_ids[split:]
-
-    return build_problem_ids(train_fns, dims), build_problem_ids(test_fns, dims)
-
 
 # ------------------------------------------------------------------ #
-# Cross-validation splits                                              #
-# ------------------------------------------------------------------ #
-
-
-def get_cv_folds(
-    cv_mode: str, dims: list[int]
-) -> list[tuple[list[str], list[str], str]]:
-    """Return (train_ids, test_ids, fold_tag) for each CV fold.
-
-    LOIO: 15 folds – hold out one BBOB instance ID at a time.
-    LOPO: 24 folds – hold out one BBOB function at a time.
-    """
-    folds = []
-    if cv_mode == "LOIO":
-        for inst in INSTANCE_IDS:
-            train_insts = [i for i in INSTANCE_IDS if i != inst]
-            folds.append(
-                (
-                    build_problem_ids(ALL_FUNCTIONS, train_insts, dims),
-                    build_problem_ids(ALL_FUNCTIONS, [inst], dims),
-                    f"inst{inst:02d}",
-                )
-            )
-    else:  # LOPO
-        for fn in sorted(ALL_FUNCTIONS):
-            train_fns = ALL_FUNCTIONS - {fn}
-            folds.append(
-                (
-                    build_problem_ids(train_fns, dims),
-                    build_problem_ids({fn}, dims),
-                    f"f{fn:03d}",
-                )
-            )
-    return folds
-
-
-# ------------------------------------------------------------------ #
-# Global optima loader                                                 #
+# Shared helpers                                                       #
 # ------------------------------------------------------------------ #
 
 
@@ -131,12 +60,9 @@ def load_global_optima(path: str = "bbob_optima.jsonl") -> dict[str, float]:
         return {k: v for line in f for k, v in json.loads(line).items()}
 
 
-# ------------------------------------------------------------------ #
-# Environment factory                                                  #
-# ------------------------------------------------------------------ #
-
-
 def make_das_env(problem_ids: list[str], optimizers: list, cfg: dict):
+    """Return a zero-argument factory for use with SB3's make_vec_env."""
+
     def _init():
         import cocoex as _cx
 
@@ -158,104 +84,32 @@ def make_das_env(problem_ids: list[str], optimizers: list, cfg: dict):
 
 
 # ------------------------------------------------------------------ #
-# CLI                                                                  #
+# PPO agent                                                            #
 # ------------------------------------------------------------------ #
 
 
-def parse_args():
-    p = argparse.ArgumentParser(description="Train a DAS agent with PPO")
-    p.add_argument("name", help="Experiment name (used for file names)")
-    p.add_argument(
-        "-p",
-        "--portfolio",
-        nargs="+",
-        default=["SPSO", "IPSO", "SPSOL"],
-        help="Sub-optimizer names from the portfolio",
-    )
-    p.add_argument(
-        "-m",
-        "--mode",
-        default="easy",
-        choices=["easy", "hard", "LOIO"],
-        help="Train/test split strategy (ignored when --cv-mode is set)",
-    )
-    p.add_argument(
-        "-d",
-        "--dims",
-        nargs="+",
-        type=int,
-        default=ALL_DIMS,
-        choices=ALL_DIMS,
-        help="Problem dimensions",
-    )
-    p.add_argument(
-        "-f",
-        "--fe-multiplier",
-        type=int,
-        default=10_000,
-        help="Budget = fe_multiplier * dimension",
-    )
-    p.add_argument(
-        "-s",
-        "--n-checkpoints",
-        type=int,
-        default=10,
-        help="Optimizer selection steps per episode",
-    )
-    p.add_argument(
-        "-x",
-        "--cdb",
-        type=float,
-        default=1.0,
-        help="Checkpoint division base (1.0 = uniform)",
-    )
-    p.add_argument("-O", "--reward-option", type=int, default=1, choices=[1, 2, 3, 4])
-    p.add_argument(
-        "-n",
-        "--n-individuals",
-        type=int,
-        default=100,
-        help="Shared population size across all sub-optimizers",
-    )
-    p.add_argument(
-        "-E",
-        "--n-epochs",
-        type=int,
-        default=1,
-        help="Number of passes over the full training set (per fold in CV mode). "
-        "total_timesteps = n_epochs × |train_ids| × n_checkpoints. "
-        "Evaluation runs once per epoch.",
-    )
-    p.add_argument(
-        "-j", "--n-envs", type=int, default=1, help="Number of parallel environments"
-    )
-    p.add_argument("--wandb", action="store_true", help="Log to Weights & Biases")
-    p.add_argument("--seed", type=int, default=42)
-    # Cross-validation options
-    p.add_argument(
-        "--cv-mode",
-        default=None,
-        choices=["LOIO", "LOPO"],
-        help="Run cross-validation: LOIO (15 folds) or LOPO (24 folds). "
-        "Omit for regular single-run training.",
-    )
-    p.add_argument(
-        "--folds",
-        nargs="+",
-        type=int,
-        default=None,
-        help="Zero-based fold indices to run (CV mode only, default: all). "
-        "Useful for parallelism or resuming interrupted runs.",
-    )
-    return p.parse_args()
+def _ppo_eval_loop(
+    model, eval_env, problem_ids: list[str], global_optima: dict, desc: str = "eval"
+) -> list[dict]:
+    results = []
+    for problem_id in tqdm(problem_ids, desc=f"  {desc}", smoothing=0.0):
+        obs = eval_env.reset()
+        done = [False]
+        info = {}
+        while not done[0]:
+            action, _ = model.predict(obs, deterministic=True)
+            obs, _, done, infos = eval_env.step(action)
+            if done[0]:
+                info = infos[0]
+        best_y = info.get("best_y", float("inf"))
+        optimum = global_optima.get(problem_id, 0.0)
+        results.append(
+            {"problem_id": problem_id, "best_y": best_y, "gap": best_y - optimum}
+        )
+    return results
 
 
-# ------------------------------------------------------------------ #
-# Single-run training                                                  #
-# ------------------------------------------------------------------ #
-
-
-def train_model(
+def _ppo_train_single(
     name: str,
     train_ids: list[str],
     test_ids: list[str],
@@ -263,16 +117,17 @@ def train_model(
     cfg: dict,
     args,
 ) -> None:
-    """Train one PPO model and save it to models/<name>."""
+    from stable_baselines3 import PPO
+    from stable_baselines3.common.env_util import make_vec_env
+    from stable_baselines3.common.vec_env import VecNormalize, SubprocVecEnv
+    from das.training.callbacks import WandbCallback, DASEvalCallback
+
     model_path = os.path.join("models", name)
     vecnorm_path = model_path + "_vecnorm.pkl"
 
-    # One epoch = one full pass over the training set.
-    # SB3 counts individual env steps; each episode has n_checkpoints steps,
-    # and epoch size is independent of n_envs (more envs → fewer rollouts, same total).
     steps_per_epoch = len(train_ids) * cfg["n_checkpoints"]
     total_timesteps = args.n_epochs * steps_per_epoch
-    eval_freq = steps_per_epoch  # evaluate once at the end of every epoch
+    eval_freq = steps_per_epoch
 
     print(
         f"  Epochs    : {args.n_epochs}  "
@@ -295,31 +150,33 @@ def train_model(
     )
     eval_env = VecNormalize(eval_env, norm_obs=True, norm_reward=False, training=False)
 
-    policy_kwargs = dict(net_arch=[96, 96])
     model = PPO(
         "MlpPolicy",
         train_env,
         learning_rate=3e-5,
         n_steps=cfg["n_checkpoints"],
         batch_size=256,
-        n_epochs=6,  # PPO gradient update epochs per rollout (different from dataset epochs)
+        n_epochs=6,
         gamma=0.8,
         gae_lambda=0.5,
         clip_range=0.3,
         ent_coef=0.01,
         vf_coef=0.3,
         max_grad_norm=0.5,
-        policy_kwargs=policy_kwargs,
+        policy_kwargs=dict(net_arch=[96, 96]),
         verbose=1,
         seed=args.seed,
     )
 
     callbacks = [
         DASEvalCallback(
-            eval_env, eval_freq=eval_freq, n_eval_episodes=len(eval_sample), name=name
-        ),
+            eval_env,
+            eval_freq=eval_freq,
+            n_eval_episodes=len(eval_sample),
+            name=name,
+        )
     ]
-    if args.wandb:
+    if getattr(args, "wandb", False):
         callbacks.append(WandbCallback())
 
     model.learn(total_timesteps=total_timesteps, callback=callbacks, progress_bar=True)
@@ -328,23 +185,74 @@ def train_model(
     train_env.save(vecnorm_path)
     train_env.close()
     eval_env.close()
-    print(f"Saved model → {model_path}.zip")
+    print(f"  Saved model → {model_path}.zip")
 
 
-# ------------------------------------------------------------------ #
-# Cross-validation                                                     #
-# ------------------------------------------------------------------ #
+def run_ppo(args) -> None:
+    from stable_baselines3 import PPO
+    from stable_baselines3.common.env_util import make_vec_env
+    from stable_baselines3.common.vec_env import VecNormalize
+
+    optimizers = get_portfolio(args.portfolio)
+    cfg = {
+        "fe_multiplier": args.fe_multiplier,
+        "n_checkpoints": args.n_checkpoints,
+        "cdb": args.cdb,
+        "reward_option": args.reward_option,
+        "n_individuals": args.n_individuals,
+        "seed": args.seed,
+    }
+
+    print(f"Portfolio : {args.portfolio}")
+    print(f"Budget    : {args.fe_multiplier}×dim  |  checkpoints={args.n_checkpoints}")
+
+    if args.cv_mode:
+        _run_ppo_cv(args, optimizers, cfg)
+        return
+
+    train_ids, test_ids = get_train_test_split(args.mode, args.dims)
+    print(
+        f"Mode      : {args.mode}  ({len(train_ids)} train / {len(test_ids)} test problems)"
+    )
+
+    _ppo_train_single(args.name, train_ids, test_ids, optimizers, cfg, args)
+
+    if args.eval:
+        print("\nRunning post-training evaluation …")
+        model_path = os.path.join("models", args.name)
+        vecnorm_path = model_path + "_vecnorm.pkl"
+        model = PPO.load(model_path)
+        eval_env = make_vec_env(
+            make_das_env(test_ids, optimizers, cfg), n_envs=1, seed=args.seed
+        )
+        if os.path.exists(vecnorm_path):
+            eval_env = VecNormalize.load(vecnorm_path, eval_env)
+            eval_env.training = False
+            eval_env.norm_reward = False
+        global_optima = load_global_optima()
+        results = _ppo_eval_loop(model, eval_env, test_ids, global_optima)
+        eval_env.close()
+        out_path = os.path.join("results", f"{args.name}_eval.jsonl")
+        with open(out_path, "w") as f:
+            for r in results:
+                f.write(json.dumps(r) + "\n")
+        gaps = [r["gap"] for r in results]
+        print(f"  Mean gap   : {np.mean(gaps):.4e}")
+        print(f"  Median gap : {np.median(gaps):.4e}")
+        print(f"  Results    : {out_path}")
 
 
-def run_cv(args, optimizers, cfg) -> None:
-    """Run k-fold cross-validation and write per-fold + summary results."""
+def _run_ppo_cv(args, optimizers: list, cfg: dict) -> None:
+    from stable_baselines3 import PPO
+    from stable_baselines3.common.env_util import make_vec_env
+    from stable_baselines3.common.vec_env import VecNormalize
+
     global_optima = load_global_optima()
-    all_folds = get_cv_folds(args.cv_mode, args.dims)
+    all_folds = get_cv_folds(args.cv_mode, args.dims, seed=args.seed)
     fold_indices = args.folds if args.folds is not None else list(range(len(all_folds)))
 
     print(
-        f"CV mode   : {args.cv_mode}  "
-        f"({len(fold_indices)}/{len(all_folds)} folds selected)"
+        f"CV mode    : {args.cv_mode}  ({len(fold_indices)}/{len(all_folds)} folds selected)"
     )
     print(f"Epochs/fold: {args.n_epochs}")
 
@@ -364,56 +272,35 @@ def run_cv(args, optimizers, cfg) -> None:
         )
         print(f"{'=' * 60}")
 
-        # ---- Training -------------------------------------------
         if os.path.exists(model_path + ".zip"):
             print(f"  [skip training] {model_path}.zip already exists")
             model = PPO.load(model_path)
         else:
-            train_model(fold_name, train_ids, test_ids, optimizers, cfg, args)
+            _ppo_train_single(fold_name, train_ids, test_ids, optimizers, cfg, args)
             model = PPO.load(model_path)
 
-        # ---- Evaluation -----------------------------------------
         if os.path.exists(result_path):
             print(f"  [skip evaluation] {result_path} already exists")
-            with open(result_path) as f:
-                fold_results = [json.loads(line) for line in f]
+            with open(result_path) as fh:
+                fold_results = [json.loads(line) for line in fh]
         else:
             eval_env = make_vec_env(
-                make_das_env(test_ids, optimizers, cfg),
-                n_envs=1,
-                seed=args.seed,
+                make_das_env(test_ids, optimizers, cfg), n_envs=1, seed=args.seed
             )
             if os.path.exists(vecnorm_path):
                 eval_env = VecNormalize.load(vecnorm_path, eval_env)
                 eval_env.training = False
                 eval_env.norm_reward = False
-
-            fold_results = []
-            for problem_id in tqdm(test_ids, desc=f"  eval {fold_tag}", smoothing=0.0):
-                obs = eval_env.reset()
-                done = [False]
-                info = {}
-                while not done[0]:
-                    action, _ = model.predict(obs, deterministic=True)
-                    obs, _, done, infos = eval_env.step(action)
-                    if done[0]:
-                        info = infos[0]
-
-                best_y = info.get("best_y", float("inf"))
-                optimum = global_optima.get(problem_id, 0.0)
-                fold_results.append(
-                    {
-                        "problem_id": problem_id,
-                        "fold": fold_tag,
-                        "best_y": best_y,
-                        "gap": best_y - optimum,
-                    }
-                )
-
-            with open(result_path, "w") as f:
-                for r in fold_results:
-                    f.write(json.dumps(r) + "\n")
+            fold_results = _ppo_eval_loop(
+                model, eval_env, test_ids, global_optima, desc=f"eval {fold_tag}"
+            )
+            for r in fold_results:
+                r["fold"] = fold_tag
             eval_env.close()
+            with open(result_path, "w") as fh:
+                for r in fold_results:
+                    fh.write(json.dumps(r) + "\n")
+            print(f"  Saved results → {result_path}")
 
         gaps = [r["gap"] for r in fold_results]
         summary = {
@@ -425,11 +312,9 @@ def run_cv(args, optimizers, cfg) -> None:
         }
         fold_summaries.append(summary)
         print(
-            f"  mean gap={summary['mean_gap']:.4e}  "
-            f"median gap={summary['median_gap']:.4e}"
+            f"  mean gap={summary['mean_gap']:.4e}  median gap={summary['median_gap']:.4e}"
         )
 
-    # ---- Aggregate summary --------------------------------------
     all_gaps = []
     for fold_idx in fold_indices:
         _, _, fold_tag = all_folds[fold_idx]
@@ -449,10 +334,9 @@ def run_cv(args, optimizers, cfg) -> None:
         "overall_median_gap": float(np.median(all_gaps)) if all_gaps else None,
         "folds": fold_summaries,
     }
-
     summary_path = os.path.join("results", f"{args.name}_cv_summary.jsonl")
-    with open(summary_path, "w") as f:
-        f.write(json.dumps(overall, indent=2) + "\n")
+    with open(summary_path, "w") as fh:
+        fh.write(json.dumps(overall, indent=2) + "\n")
 
     print(f"\n{'=' * 60}")
     print(f"Cross-validation complete  ({args.cv_mode})")
@@ -464,39 +348,351 @@ def run_cv(args, optimizers, cfg) -> None:
 
 
 # ------------------------------------------------------------------ #
+# RL-DAS agent                                                         #
+# ------------------------------------------------------------------ #
+
+
+def run_rl_das(args) -> None:
+    import cocoex as cx
+    from agents.rl_das import RLDASEnv, PPOAgent, train, evaluate
+
+    optimizers = get_portfolio(args.portfolio)
+    if not optimizers:
+        raise ValueError(f"Unknown optimizers: {args.portfolio}")
+
+    train_ids, test_ids = get_train_test_split(args.mode, [args.dim])
+    print(f"Train: {len(train_ids)} problems  |  Test: {len(test_ids)} problems")
+
+    suite = cx.Suite("bbob", "", "")
+
+    if args.k_epoch is None:
+        args.k_epoch = max(1, int(0.3 * args.n_checkpoints))
+
+    env_kwargs = dict(
+        suite=suite,
+        optimizers=optimizers,
+        dim=args.dim,
+        fe_multiplier=args.fe_multiplier,
+        n_checkpoints=args.n_checkpoints,
+        n_individuals=args.n_individuals,
+        seed=args.seed,
+    )
+    train_env = RLDASEnv(problem_ids=train_ids, **env_kwargs)
+    test_env = RLDASEnv(problem_ids=test_ids, **env_kwargs)
+
+    print(
+        f"RL-DAS  |  dim={args.dim}  |  portfolio={args.portfolio}"
+        f"  |  obs_dim={train_env.observation_space.shape[0]}"
+        f"  |  k_epoch={args.k_epoch}"
+    )
+
+    agent = PPOAgent(
+        dim=args.dim, n_opt=len(optimizers), lr=args.lr, device=args.device
+    )
+
+    train(
+        train_env=train_env,
+        test_env=test_env,
+        agent=agent,
+        n_epochs=args.n_epochs,
+        k_epoch=args.k_epoch,
+        eval_interval=args.eval_interval,
+        save_interval=args.save_interval,
+        save_dir="models",
+        name=args.name,
+    )
+
+    if args.eval:
+        print("\nRunning final evaluation on test set …")
+        test_results = evaluate(test_env, agent, n_episodes=len(test_env._problem_ids))
+        mean_best_y = float(np.mean([r["best_y"] for r in test_results]))
+        print(f"Test mean best_y = {mean_best_y:.6e}")
+        eval_path = os.path.join("results", f"{args.name}_eval.jsonl")
+        with open(eval_path, "w") as f:
+            for r in test_results:
+                f.write(json.dumps(r) + "\n")
+        print(f"Results saved to {eval_path}")
+
+
+# ------------------------------------------------------------------ #
+# Exponential-DAS agent                                                #
+# ------------------------------------------------------------------ #
+
+
+def run_exp_das(args) -> None:
+    import cocoex as cx
+    from agents.exponential_das import ExpDASAgent, train, evaluate
+    from das.env.observation import observation_dim
+
+    optimizers = get_portfolio(args.portfolio)
+    n_opt = len(optimizers)
+    obs_dim = observation_dim(n_opt)
+
+    train_ids, test_ids = get_train_test_split(args.mode, args.dims)
+    print(f"Train: {len(train_ids)} problems  |  Test: {len(test_ids)} problems")
+    print(f"obs_dim={obs_dim}  cdb={args.cdb}  n_checkpoints={args.n_checkpoints}")
+
+    suite = cx.Suite("bbob", "", "")
+
+    env_cfg = dict(
+        suite=suite,
+        optimizers=optimizers,
+        fe_multiplier=args.fe_multiplier,
+        n_checkpoints=args.n_checkpoints,
+        checkpoint_division_base=args.cdb,
+        reward_option=args.reward_option,
+        n_individuals=args.n_individuals,
+        seed=args.seed,
+    )
+    train_env = DASEnv(problem_ids=train_ids, **env_cfg)
+    test_env = DASEnv(problem_ids=test_ids, **env_cfg)
+
+    buffer_capacity = args.buffer_capacity or (16 * args.n_checkpoints)
+
+    agent = ExpDASAgent(
+        obs_dim=obs_dim,
+        n_actions=n_opt,
+        buffer_capacity=buffer_capacity,
+        actor_lr=args.actor_lr,
+        critic_lr=args.critic_lr,
+        ppo_epochs=args.ppo_epochs,
+        n_checkpoints=args.n_checkpoints,
+        device=args.device,
+    )
+
+    print(
+        f"Exponential-DAS  |  portfolio={args.portfolio}"
+        f"  |  buffer_capacity={buffer_capacity}"
+        f"  |  ppo_epochs={args.ppo_epochs}"
+    )
+
+    train(
+        train_env=train_env,
+        test_env=test_env,
+        agent=agent,
+        total_episodes=args.total_episodes,
+        eval_interval=args.eval_interval,
+        save_interval=args.save_interval,
+        save_dir="models",
+        name=args.name,
+    )
+
+    if args.eval:
+        print("\nFinal evaluation on test set …")
+        test_results = evaluate(test_env, agent, n_episodes=min(len(test_ids), 50))
+        mean_best_y = float(np.mean([r["best_y"] for r in test_results]))
+        print(f"Test mean best_y = {mean_best_y:.6e}")
+        eval_path = os.path.join("results", f"{args.name}_eval.jsonl")
+        with open(eval_path, "w") as f:
+            for r in test_results:
+                f.write(json.dumps(r) + "\n")
+        print(f"Results saved to {eval_path}")
+
+
+# ------------------------------------------------------------------ #
+# Argument parsing                                                     #
+# ------------------------------------------------------------------ #
+
+
+def _add_shared_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("name", help="Experiment name (used for output file names)")
+    p.add_argument(
+        "-p",
+        "--portfolio",
+        nargs="+",
+        default=["SPSO", "IPSO", "SPSOL"],
+        help="Sub-optimizer names from the portfolio",
+    )
+    p.add_argument(
+        "--mode",
+        choices=["easy", "hard", "random"],
+        default="easy",
+        help="Train/test split strategy",
+    )
+    p.add_argument(
+        "--fe-multiplier",
+        type=int,
+        default=10_000,
+        help="Budget = fe_multiplier × dimension",
+    )
+    p.add_argument(
+        "--n-checkpoints",
+        type=int,
+        default=10,
+        help="Optimizer-selection steps per episode",
+    )
+    p.add_argument("--n-individuals", type=int, default=100, help="Population size")
+    p.add_argument("--seed", type=int, default=42)
+
+
+def _parse_args() -> argparse.Namespace:
+    root = argparse.ArgumentParser(
+        description="Train a DAS agent.  Choose an agent with a sub-command.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    sub = root.add_subparsers(
+        dest="agent", required=True, metavar="{ppo,rl-das,exp-das}"
+    )
+
+    # ---- PPO --------------------------------------------------------
+    ppo = sub.add_parser(
+        "ppo",
+        help="SB3 PPO with VecNormalize (multi-dim, CV support)",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    _add_shared_args(ppo)
+    ppo.add_argument(
+        "-d",
+        "--dims",
+        nargs="+",
+        type=int,
+        default=ALL_DIMS,
+        choices=ALL_DIMS,
+        help="Problem dimensions",
+    )
+    ppo.add_argument(
+        "-x", "--cdb", type=float, default=1.0, help="Checkpoint division base"
+    )
+    ppo.add_argument(
+        "-O",
+        "--reward-option",
+        type=int,
+        default=1,
+        choices=[1, 2, 3, 4],
+        help="Reward shaping option",
+    )
+    ppo.add_argument(
+        "-E",
+        "--n-epochs",
+        type=int,
+        default=1,
+        help="Passes over the full training set. "
+        "total_timesteps = n_epochs × |train_ids| × n_checkpoints",
+    )
+    ppo.add_argument(
+        "-j", "--n-envs", type=int, default=1, help="Parallel training envs"
+    )
+    ppo.add_argument("--wandb", action="store_true", help="Log to Weights & Biases")
+    ppo.add_argument(
+        "--eval",
+        action="store_true",
+        help="Run evaluation on the test set immediately after training",
+    )
+    ppo.add_argument(
+        "--cv-mode",
+        default=None,
+        choices=["LOIO", "LOPO"],
+        help="3-fold CV: LOIO holds out 5 of 15 instances per fold; LOPO holds out 8 of 24 functions per fold",
+    )
+    ppo.add_argument(
+        "--folds",
+        nargs="+",
+        type=int,
+        default=None,
+        help="Zero-based fold indices to run (CV mode only, default: all)",
+    )
+
+    # ---- RL-DAS -----------------------------------------------------
+    rl = sub.add_parser(
+        "rl-das",
+        help="Custom RL-DAS: single-dimension, pure-PyTorch PPO",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    _add_shared_args(rl)
+    rl.add_argument(
+        "--dim", type=int, default=10, help="Problem dimension (agent is dim-specific)"
+    )
+    rl.add_argument("--n-epochs", type=int, default=500, help="Training epochs")
+    rl.add_argument(
+        "--k-epoch",
+        type=int,
+        default=None,
+        help="PPO gradient steps per episode (default: int(0.3 × n_checkpoints))",
+    )
+    rl.add_argument("--lr", type=float, default=1e-5, help="Learning rate")
+    rl.add_argument(
+        "--eval-interval", type=int, default=5, help="Evaluate every N epochs"
+    )
+    rl.add_argument(
+        "--save-interval", type=int, default=50, help="Checkpoint every N epochs"
+    )
+    rl.add_argument("--device", default="cpu", help="PyTorch device")
+    rl.add_argument(
+        "--no-eval", dest="eval", action="store_false", help="Skip final evaluation"
+    )
+    rl.set_defaults(eval=True)
+
+    # ---- Exp-DAS ----------------------------------------------------
+    exp = sub.add_parser(
+        "exp-das",
+        help="Exponential-DAS: custom PPO with exponential checkpoint spacing",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    _add_shared_args(exp)
+    exp.add_argument(
+        "--dims",
+        nargs="+",
+        type=int,
+        default=[2, 5, 10],
+        help="Problem dimensions",
+    )
+    exp.add_argument(
+        "--cdb",
+        type=float,
+        default=2.0,
+        help="Checkpoint division base (>1 = exponential)",
+    )
+    exp.add_argument(
+        "--reward-option",
+        type=int,
+        default=1,
+        choices=[1, 2, 3, 4],
+        help="Reward shaping option",
+    )
+    exp.add_argument(
+        "--buffer-capacity",
+        type=int,
+        default=None,
+        help="PPO rollout buffer size in steps (default: 16 × n_checkpoints)",
+    )
+    exp.add_argument(
+        "--total-episodes", type=int, default=5000, help="Total training episodes"
+    )
+    exp.add_argument(
+        "--eval-interval", type=int, default=100, help="Evaluate every N episodes"
+    )
+    exp.add_argument(
+        "--save-interval", type=int, default=500, help="Checkpoint every N episodes"
+    )
+    exp.add_argument("--actor-lr", type=float, default=3e-5, help="Actor learning rate")
+    exp.add_argument(
+        "--critic-lr", type=float, default=1e-5, help="Critic learning rate"
+    )
+    exp.add_argument(
+        "--ppo-epochs", type=int, default=6, help="PPO gradient epochs per update"
+    )
+    exp.add_argument("--device", default="cpu", help="PyTorch device")
+    exp.add_argument(
+        "--no-eval", dest="eval", action="store_false", help="Skip final evaluation"
+    )
+    exp.set_defaults(eval=True)
+
+    return root.parse_args()
+
+
+# ------------------------------------------------------------------ #
 # Main                                                                 #
 # ------------------------------------------------------------------ #
 
 
-def main():
-    args = parse_args()
+def main() -> None:
+    args = _parse_args()
     set_seed(args.seed)
-    os.makedirs("models", exist_ok=True)
-    os.makedirs("results", exist_ok=True)
+    Path("models").mkdir(exist_ok=True)
+    Path("results").mkdir(exist_ok=True)
 
-    optimizers = get_portfolio(args.portfolio)
-
-    cfg = {
-        "fe_multiplier": args.fe_multiplier,
-        "n_checkpoints": args.n_checkpoints,
-        "cdb": args.cdb,
-        "reward_option": args.reward_option,
-        "n_individuals": args.n_individuals,
-        "seed": args.seed,
-    }
-
-    print(f"Portfolio : {args.portfolio}")
-    print(f"Budget    : {args.fe_multiplier}×dim  |  checkpoints={args.n_checkpoints}")
-
-    if args.cv_mode:
-        run_cv(args, optimizers, cfg)
-    else:
-        train_ids, test_ids = get_train_test_split(args.mode, args.dims)
-        print(
-            f"Mode      : {args.mode}  "
-            f"({len(train_ids)} train / {len(test_ids)} test problems)"
-        )
-        train_model(args.name, train_ids, test_ids, optimizers, cfg, args)
+    dispatch = {"ppo": run_ppo, "rl-das": run_rl_das, "exp-das": run_exp_das}
+    dispatch[args.agent](args)
 
 
 if __name__ == "__main__":

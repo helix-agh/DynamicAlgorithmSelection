@@ -21,10 +21,11 @@ from stable_baselines3.common.vec_env import VecNormalize
 from stable_baselines3.common.env_util import make_vec_env
 from tqdm import tqdm
 
+from das.env.bbob_splits import ALL_DIMS, get_train_test_split
 from das.env.das_env import DASEnv
 from das.optimizers.portfolio import get_portfolio
 from das.utils import set_seed
-from train import get_train_test_split, load_global_optima, make_das_env, ALL_DIMS
+from train import load_global_optima, make_das_env
 
 warnings.filterwarnings("ignore")
 
@@ -60,7 +61,7 @@ def parse_args():
     p = argparse.ArgumentParser(description="Evaluate a trained DAS agent")
     p.add_argument("name", help="Model name (looks for models/<name>.zip)")
     p.add_argument("-p", "--portfolio", nargs="+", default=["SPSO", "IPSO", "SPSOL"])
-    p.add_argument("-m", "--mode", default="easy", choices=["easy", "hard", "LOIO"])
+    p.add_argument("-m", "--mode", default="easy", choices=["easy", "hard", "random"])
     p.add_argument(
         "-d", "--dims", nargs="+", type=int, default=ALL_DIMS, choices=ALL_DIMS
     )
