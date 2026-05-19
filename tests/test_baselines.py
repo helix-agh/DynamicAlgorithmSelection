@@ -56,7 +56,9 @@ class MockSuite:
 
 PROBLEM_IDS = [f"mock_f{i:02d}" for i in range(4)]
 N_CHECKPOINTS = 3
-FE_MULTIPLIER = 50
+FE_MULTIPLIER = (
+    5  # keep total budget (FE_MULTIPLIER × dim) < 50 to avoid ELA computation
+)
 N_INDIVIDUALS = 10
 PORTFOLIO = ["SPSO", "IPSO"]
 
@@ -259,11 +261,8 @@ class TestSingleAlgorithm:
         """The optimizer must receive the full budget (fe_multiplier × dim)."""
         opt_class = get_portfolio(["SPSO"])[0]
         problem = MockProblem("test_p", dim=2)
-        # With tiny budget the optimizer can barely initialise
-        result_small = run_single_algorithm(opt_class, problem, 5, N_INDIVIDUALS)
-        result_large = run_single_algorithm(
-            opt_class, problem, FE_MULTIPLIER, N_INDIVIDUALS
-        )
+        result_small = run_single_algorithm(opt_class, problem, 2, N_INDIVIDUALS)
+        result_large = run_single_algorithm(opt_class, problem, 50, N_INDIVIDUALS)
         # Larger budget should not produce a worse result
         assert result_large <= result_small + 1e-6
 

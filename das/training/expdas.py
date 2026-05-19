@@ -195,7 +195,7 @@ def run_cv_exp_das(args) -> None:
         "name": args.name,
         "portfolio": args.portfolio,
         "dims": args.dims,
-        "total_episodes_per_fold": args.total_episodes,
+        "n_epochs_per_fold": args.n_epochs,
         "n_folds_run": len(fold_summaries),
         "overall_mean_best_y": float(np.mean(all_best_y)) if all_best_y else None,
         "folds": fold_summaries,
