@@ -78,6 +78,16 @@ def _add_shared_args(
         help="Population size override (default: each algorithm uses its own built-in default)",
     )
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument(
+        "--ela-recompute-every",
+        type=int,
+        default=500,
+        help=(
+            "Recompute ELA features every N new population samples. "
+            "Set to 1 to recompute on every step (slow but maximally fresh). "
+            "Default: 500."
+        ),
+    )
 
 
 def _parse_args() -> argparse.Namespace:

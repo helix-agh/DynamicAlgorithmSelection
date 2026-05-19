@@ -130,6 +130,7 @@ def make_das_env(problem_ids: list[str], optimizers: list, cfg: dict):
             reward_option=cfg["reward_option"],
             n_individuals=cfg["n_individuals"],
             seed=cfg.get("seed"),
+            ela_recompute_every=cfg.get("ela_recompute_every", 500),
         )
 
     return _init
