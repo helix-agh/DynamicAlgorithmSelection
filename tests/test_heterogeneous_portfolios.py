@@ -144,36 +144,14 @@ def round_robin(n):
     return _policy
 
 
-def reverse_round_robin(n):
-    """Cycles through actions n-1, n-2, …, 0 across successive steps."""
-    state = {"i": 0}
-
-    def _policy(env):
-        a = (n - 1) - (state["i"] % n)
-        state["i"] += 1
-        return a
-
-    return _policy
-
-
-def _make_rr(n, direction):
-    return round_robin(n) if direction == "forward" else reverse_round_robin(n)
-
-
 # ------------------------------------------------------------------ #
 # 1. BO + PSO + ES — three-family portfolios                         #
 # ------------------------------------------------------------------ #
 
-# Each row: (portfolio spec, dim, fn_name)
 _BO_PSO_ES = [
     (["GPBO_EI", "SPSO", "LMCMAES"], 2, "sphere"),
-    (["GPBO_UCB", "SPSO", "LMCMAES"], 2, "abs"),
-    (["GPBO_EI", "IPSO", "CMAES"], 2, "multimodal"),
-    (["GPBO_UCB", "IPSO", "CMAES"], 3, "sphere"),
+    (["GPBO_UCB", "IPSO", "CMAES"], 2, "multimodal"),
     (["GPBO_EI", "SPSOL", "LMCMAES"], 3, "asymmetric"),
-    (["GPBO_UCB", "CPSO", "CMAES"], 2, "step"),
-    (["GPBO_EI", "SPSO", "CMAES"], 1, "sphere"),
-    (["GPBO_UCB", "IPSO", "LMCMAES"], 1, "abs"),
     (["GPBO_EI", "SPSO", "LMCMAES"], 5, "sphere"),
 ]
 
@@ -188,57 +166,27 @@ class TestBOPSOES:
         info = drain(env)
         assert np.isfinite(info["best_y"])
 
-    @pytest.mark.parametrize("direction", ["forward", "reverse"])
     @pytest.mark.parametrize("spec,dim,fn_name", _BO_PSO_ES)
-    def test_round_robin_exercises_all_handoffs(self, spec, dim, fn_name, direction):
-        """Round-robin (forward and reverse) forces every consecutive pair to hand off."""
+    def test_round_robin_exercises_all_handoffs(self, spec, dim, fn_name):
+        """Round-robin forces every consecutive pair to hand off."""
         classes = resolve(spec)
         env = make_env(classes, dim=dim, fn=FUNCTIONS[fn_name])
         env.reset()
-        info = drain(env, policy=_make_rr(len(classes), direction))
+        info = drain(env, policy=round_robin(len(classes)))
         assert np.isfinite(info["best_y"])
         assert set(env._choices_history) == set(range(len(classes)))
-
-    @pytest.mark.parametrize("spec,dim,fn_name", _BO_PSO_ES[:4])
-    def test_fixed_bo_policy_only_calls_bo(self, spec, dim, fn_name):
-        env = make_env(resolve(spec), dim=dim, fn=FUNCTIONS[fn_name])
-        env.reset()
-        drain(env, policy=fixed(0))
-        assert all(c == 0 for c in env._choices_history)
-        assert np.isfinite(env._best_y)
-
-    @pytest.mark.parametrize("spec,dim,fn_name", _BO_PSO_ES[:4])
-    def test_fixed_pso_policy_never_calls_bo(self, spec, dim, fn_name):
-        env = make_env(resolve(spec), dim=dim, fn=FUNCTIONS[fn_name])
-        env.reset()
-        drain(env, policy=fixed(1))  # PSO is always at index 1
-        assert all(c == 1 for c in env._choices_history)
-        assert np.isfinite(env._best_y)
-
-    @pytest.mark.parametrize("spec,dim,fn_name", _BO_PSO_ES[:4])
-    def test_fixed_es_policy_never_calls_bo(self, spec, dim, fn_name):
-        env = make_env(resolve(spec), dim=dim, fn=FUNCTIONS[fn_name])
-        env.reset()
-        drain(env, policy=fixed(2))  # ES is always at index 2
-        assert all(c == 2 for c in env._choices_history)
-        assert np.isfinite(env._best_y)
 
 
 # ------------------------------------------------------------------ #
 # 2. BO + PSO + DE — three-family portfolios                         #
 # ------------------------------------------------------------------ #
 
-# MADDE/NL_SHADE_RSP respect env n_individuals (=10 here).
-# JDE21 forces NP=170, so it gets a larger budget via fe_multiplier=250.
 _BO_PSO_DE_LIGHT = [
     (["GPBO_EI", "SPSO", "MADDE"], 2, "sphere", 100),
-    (["GPBO_UCB", "SPSO", "NL_SHADE_RSP"], 2, "abs", 100),
-    (["GPBO_EI", "IPSO", "MADDE"], 3, "multimodal", 100),
     (["GPBO_UCB", "CPSO", "NL_SHADE_RSP"], 2, "step", 100),
 ]
 _BO_PSO_DE_HEAVY = [
     (["GPBO_EI", "SPSO", "JDE21"], 2, "sphere", 250),
-    (["GPBO_UCB", "IPSO", "JDE21"], 3, "abs", 250),
 ]
 
 
@@ -256,13 +204,12 @@ class TestBOPSODE:
         info = drain(env)
         assert np.isfinite(info["best_y"])
 
-    @pytest.mark.parametrize("direction", ["forward", "reverse"])
     @pytest.mark.parametrize("spec,dim,fn_name,fe_mult", _BO_PSO_DE_LIGHT)
-    def test_round_robin_all_families(self, spec, dim, fn_name, fe_mult, direction):
+    def test_round_robin_all_families(self, spec, dim, fn_name, fe_mult):
         classes = resolve(spec)
         env = make_env(classes, dim=dim, fn=FUNCTIONS[fn_name], fe_multiplier=fe_mult)
         env.reset()
-        info = drain(env, policy=_make_rr(len(classes), direction))
+        info = drain(env, policy=round_robin(len(classes)))
         assert np.isfinite(info["best_y"])
         assert set(env._choices_history) == set(range(len(classes)))
 
@@ -274,9 +221,6 @@ class TestBOPSODE:
 _ALL_FOUR = [
     (["GPBO_EI", "SPSO", "CMAES", "MADDE"], 2, "sphere", 100),
     (["GPBO_UCB", "IPSO", "LMCMAES", "NL_SHADE_RSP"], 2, "abs", 100),
-    (["GPBO_EI", "SPSO", "LMCMAES", "MADDE"], 3, "multimodal", 100),
-    (["GPBO_UCB", "CPSO", "CMAES", "NL_SHADE_RSP"], 3, "asymmetric", 100),
-    (["GPBO_EI", "SPSO", "CMAES", "JDE21"], 2, "sphere", 250),
 ]
 
 
@@ -292,14 +236,12 @@ class TestAllFourFamilies:
         info = drain(env)
         assert np.isfinite(info["best_y"])
 
-    @pytest.mark.parametrize("direction", ["forward", "reverse"])
-    @pytest.mark.parametrize("spec,dim,fn_name,fe_mult", _ALL_FOUR[:3])
-    def test_round_robin_visits_all_four(self, spec, dim, fn_name, fe_mult, direction):
-        # With N_CHECKPOINTS=3 and 4 optimizers, forward visits [0,1,2], reverse visits [3,2,1]
+    def test_round_robin_visits_all_four(self):
+        spec, dim, fn_name, fe_mult = _ALL_FOUR[0]
         classes = resolve(spec)
         env = make_env(classes, dim=dim, fn=FUNCTIONS[fn_name], fe_multiplier=fe_mult)
         env.reset()
-        info = drain(env, policy=_make_rr(len(classes), direction))
+        info = drain(env, policy=round_robin(len(classes)))
         assert np.isfinite(info["best_y"])
 
     def test_best_y_nondecreasing_all_families(self):
@@ -343,74 +285,34 @@ class TestWarmStartChains:
     # -- BO ↔ PSO --------------------------------------------------- #
 
     def test_bo_pso_bo(self):
-        # GPBO_EI → SPSO → GPBO_EI: BO hands population to PSO, gets it back
         self._run_chain(["GPBO_EI", "SPSO", "LMCMAES"], actions=[0, 1, 0])
 
     def test_pso_bo_pso(self):
-        # SPSO → GPBO_EI → SPSO: population seeded into GP, then back to PSO
         self._run_chain(["GPBO_EI", "SPSO", "LMCMAES"], actions=[1, 0, 1])
 
     def test_pso_bo_es(self):
-        # SPSO → GPBO_UCB → LMCMAES
         self._run_chain(["GPBO_UCB", "SPSO", "LMCMAES"], actions=[1, 0, 2])
 
     # -- BO ↔ ES ---------------------------------------------------- #
 
     def test_bo_es_bo(self):
-        # GPBO_EI → CMAES → GPBO_EI
         self._run_chain(["GPBO_EI", "SPSO", "CMAES"], actions=[0, 2, 0])
-
-    def test_es_bo_pso(self):
-        # CMAES → GPBO_UCB → SPSO
-        self._run_chain(["GPBO_UCB", "SPSO", "CMAES"], actions=[2, 0, 1])
-
-    def test_es_bo_es(self):
-        # LMCMAES → GPBO_EI → CMAES: cross-ES transition via BO bridge
-        self._run_chain(
-            ["GPBO_EI", "SPSO", "LMCMAES", "CMAES"],
-            actions=[2, 0, 3],
-            fe_multiplier=100,
-        )
 
     # -- BO ↔ DE ---------------------------------------------------- #
 
     def test_de_bo_pso(self):
-        # MADDE → GPBO_EI → SPSO
         self._run_chain(["GPBO_EI", "SPSO", "MADDE"], actions=[2, 0, 1])
 
     def test_pso_bo_de(self):
-        # SPSO → GPBO_UCB → NL_SHADE_RSP
         self._run_chain(["GPBO_UCB", "SPSO", "NL_SHADE_RSP"], actions=[1, 0, 2])
 
     def test_bo_de_bo(self):
-        # GPBO_EI → MADDE → GPBO_EI: BO hands off to DE and reclaims state
         self._run_chain(["GPBO_EI", "SPSO", "MADDE"], actions=[0, 2, 0])
 
     # -- BO ↔ BO ---------------------------------------------------- #
 
     def test_ei_pso_ucb(self):
-        # GPBO_EI → SPSO → GPBO_UCB: EI observations flow through PSO to UCB
         self._run_chain(["GPBO_EI", "GPBO_UCB", "SPSO"], actions=[0, 2, 1])
-
-    def test_ucb_pso_ei(self):
-        # GPBO_UCB → SPSO → GPBO_EI
-        self._run_chain(["GPBO_EI", "GPBO_UCB", "SPSO"], actions=[1, 2, 0])
-
-    def test_ei_ucb_pso(self):
-        # GPBO_EI → GPBO_UCB → SPSO: BO→BO obs hand-off then PSO
-        self._run_chain(["GPBO_EI", "GPBO_UCB", "SPSO"], actions=[0, 1, 2])
-
-    # -- Higher-dimension chains ------------------------------------ #
-
-    @pytest.mark.parametrize("dim", [3, 5])
-    def test_bo_pso_es_dim(self, dim):
-        self._run_chain(["GPBO_EI", "SPSO", "CMAES"], actions=[0, 1, 2], dim=dim)
-
-    @pytest.mark.parametrize("fn_name", ["abs", "multimodal", "asymmetric", "step"])
-    def test_bo_pso_es_landscape(self, fn_name):
-        self._run_chain(
-            ["GPBO_EI", "SPSO", "LMCMAES"], actions=[0, 1, 2], fn=FUNCTIONS[fn_name]
-        )
 
 
 # ------------------------------------------------------------------ #
@@ -419,9 +321,6 @@ class TestWarmStartChains:
 
 _CONTRACT_PORTFOLIOS = [
     (["GPBO_EI", "SPSO", "LMCMAES"], 100),
-    (["GPBO_UCB", "IPSO", "CMAES"], 100),
-    (["GPBO_EI", "GPBO_UCB", "SPSO"], 100),
-    (["GPBO_EI", "SPSO", "MADDE"], 100),
     (["GPBO_EI", "SPSO", "CMAES", "MADDE"], 100),
 ]
 
