@@ -32,7 +32,9 @@ class _MovementEmbedder(nn.Module):
             nn.Linear(dim, 64),
             nn.ReLU(),
             nn.Linear(64, 1),
-            nn.ReLU(),
+            # No second ReLU: movement vectors are signed displacements.
+            # Clamping to >= 0 discards direction — the network cannot tell
+            # whether the optimizer stepped left or right in search space.
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -94,4 +96,7 @@ class Critic(nn.Module):
         self.head = nn.Linear(16, 1)
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        # Mirror Actor's NaN guard: a NaN value estimate flows into advantages
+        # and silently zeroes all gradients via backward(), corrupting the update.
+        obs = torch.nan_to_num(obs, nan=0.0, posinf=1.0, neginf=-1.0)
         return self.head(self.backbone(obs)).squeeze(-1)  # (batch,)

@@ -242,6 +242,13 @@ class RLDASEnv(gym.Env):
         self._best_history: list[list[np.ndarray]] = [[] for _ in range(self.n_opt)]
         self._worst_history: list[list[np.ndarray]] = [[] for _ in range(self.n_opt)]
 
+    @property
+    def problem_ids(self) -> list[str]:
+        # Public accessor — callers should not reach into _problem_ids directly
+        # because it is filtered (dimension-matched) and may differ from the
+        # original list passed to the constructor.
+        return self._problem_ids
+
     # ------------------------------------------------------------------
     # Gymnasium interface
     # ------------------------------------------------------------------

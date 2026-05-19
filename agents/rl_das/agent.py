@@ -194,17 +194,16 @@ class PPOAgent:
             )
             actor_loss = -torch.min(surr1, surr2).mean()
 
-            # Value clipping (like PPO v2) from the 2nd epoch onward
-            if epoch_idx > 0:
-                values_clipped = old_values_t + torch.clamp(
-                    values - old_values_t, -self.eps_clip, self.eps_clip
-                )
-                critic_loss = torch.max(
-                    (values - returns_t.detach()) ** 2,
-                    (values_clipped - returns_t.detach()) ** 2,
-                ).mean()
-            else:
-                critic_loss = (values - returns_t.detach()).pow(2).mean()
+            # Value clipping applied from the first inner epoch.  Skipping it
+            # on epoch 0 allowed an unconstrained large update on the first step,
+            # breaking the PPO v2 guarantee that value changes stay within eps_clip.
+            values_clipped = old_values_t + torch.clamp(
+                values - old_values_t, -self.eps_clip, self.eps_clip
+            )
+            critic_loss = torch.max(
+                (values - returns_t.detach()) ** 2,
+                (values_clipped - returns_t.detach()) ** 2,
+            ).mean()
 
             loss = actor_loss + 0.5 * critic_loss - 0.01 * entropy
 

@@ -102,18 +102,24 @@ def train(
     """
     Path(save_dir).mkdir(parents=True, exist_ok=True)
     log: list[dict] = []
-    n_train = len(train_env._problem_ids)
+    n_train = len(train_env.problem_ids)
 
     for epoch in range(1, n_epochs + 1):
-        epoch_rewards = []
+        epoch_rewards: list[float] = []
+        epoch_diagnostics: list[dict] = []
         epoch_start = time.time()
 
         for _ in range(n_train):
             ep = _run_episode(train_env, agent, deterministic=False)
             epoch_rewards.append(ep["total_reward"])
 
-            agent.learn(k_epoch)
+            # bootstrap_value=0.0 is correct: this env only terminates naturally
+            # (terminated=True, truncated always False), so the last done=True flag
+            # already zeroes future returns — no critic bootstrap is needed.
+            diag = agent.learn(k_epoch, bootstrap_value=0.0)
             agent.rollout.clear()
+            if diag:
+                epoch_diagnostics.append(diag)
 
         mean_train_reward = float(np.mean(epoch_rewards))
         entry: dict = {
@@ -122,9 +128,16 @@ def train(
             "elapsed_s": round(time.time() - epoch_start, 2),
         }
 
+        # Log per-epoch PPO diagnostics so training instability is visible
+        # (e.g. actor_loss explosion, entropy collapse) without manual debugging.
+        if epoch_diagnostics:
+            entry["actor_loss"] = float(np.mean([d["actor_loss"] for d in epoch_diagnostics]))
+            entry["critic_loss"] = float(np.mean([d["critic_loss"] for d in epoch_diagnostics]))
+            entry["entropy"] = float(np.mean([d["entropy"] for d in epoch_diagnostics]))
+
         if epoch % eval_interval == 0:
             test_results = evaluate(
-                test_env, agent, n_episodes=len(test_env._problem_ids)
+                test_env, agent, n_episodes=len(test_env.problem_ids)
             )
             entry["mean_test_reward"] = float(
                 np.mean([r["total_reward"] for r in test_results])
@@ -137,12 +150,16 @@ def train(
                 f"  train_r={mean_train_reward:.4f}"
                 f"  test_r={entry['mean_test_reward']:.4f}"
                 f"  test_best_y={entry['mean_test_best_y']:.4e}"
+                f"  actor_loss={entry.get('actor_loss', float('nan')):.4f}"
+                f"  entropy={entry.get('entropy', float('nan')):.4f}"
                 f"  ({entry['elapsed_s']:.1f}s)"
             )
         else:
             print(
                 f"Epoch {epoch:4d}/{n_epochs}"
                 f"  train_r={mean_train_reward:.4f}"
+                f"  actor_loss={entry.get('actor_loss', float('nan')):.4f}"
+                f"  entropy={entry.get('entropy', float('nan')):.4f}"
                 f"  ({entry['elapsed_s']:.1f}s)"
             )
 
@@ -186,7 +203,7 @@ def evaluate(
     List of dicts with keys: problem_id, total_reward, best_y, n_fe.
     """
     if n_episodes is None:
-        n_episodes = len(env._problem_ids)
+        n_episodes = len(env.problem_ids)
 
     results = []
     for _ in range(n_episodes):

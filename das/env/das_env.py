@@ -16,9 +16,20 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 
-from das.env.observation import compute_observation, observation_dim
+from das.env.observation import (
+    compute_observation,
+    observation_dim,
+    compute_ela_features,
+    MAX_HISTORY_SAMPLE,
+    ELA_DIM,
+)
 from das.env.reward import compute_reward
 from das.optimizers.base import get_checkpoints
+
+# Recompute ELA every ~500 new population samples.  pflacco runs regression,
+# nearest-neighbour search, and IC calculations on every call — running it
+# every step would dominate wall-clock time for long training runs.
+_ELA_RECOMPUTE_THRESHOLD = MAX_HISTORY_SAMPLE // 5
 
 
 class DASEnv(gym.Env):
@@ -110,6 +121,11 @@ class DASEnv(gym.Env):
         self._stagnation_count = 0
         self._choices_history: list[int] = []
 
+        # ELA features are expensive; cache the last computed vector and refresh
+        # lazily once _ELA_RECOMPUTE_THRESHOLD new samples have arrived.
+        self._ela_cache: np.ndarray = np.zeros(ELA_DIM, dtype=np.float32)
+        self._ela_cache_len: int = 0
+
     # ------------------------------------------------------------------ #
     # Gymnasium interface                                                  #
     # ------------------------------------------------------------------ #
@@ -140,6 +156,8 @@ class DASEnv(gym.Env):
         self._initial_range = (float("inf"), -np.inf)
         self._stagnation_count = 0
         self._choices_history = []
+        self._ela_cache = np.zeros(ELA_DIM, dtype=np.float32)
+        self._ela_cache_len = 0
 
         obs = self._build_observation()
         info = {"problem_id": problem_id, "dimension": dim}
@@ -251,14 +269,25 @@ class DASEnv(gym.Env):
         if worst_y > self._worst_y:
             self._worst_y = worst_y
 
-        # Set initial range on first step
+        # Set initial range on first step.
+        # When worst_so_far_y is absent the default is -inf, which collapses
+        # scale to 1e-5 and inflates every subsequent reward by 1e5.  Instead,
+        # derive scale from the magnitude of the initial best fitness.
         if self._initial_range[0] == float("inf"):
-            self._initial_range = (new_best_y, max(worst_y, new_best_y + 1e-5))
+            safe_worst = (
+                worst_y if np.isfinite(worst_y) else new_best_y + max(abs(new_best_y), 1.0)
+            )
+            self._initial_range = (new_best_y, max(safe_worst, new_best_y + 1e-5))
 
-        # Stagnation counter
+        # Stagnation counter — prefer the FE delta from the result dict so that
+        # stagnation accumulates correctly even when y_history is not returned.
         x_hist: np.ndarray | None = result.get("x_history")
         y_hist: np.ndarray | None = result.get("y_history")
-        n_fe_step = len(y_hist) if y_hist is not None else 0
+        n_fe_reported = result.get("n_function_evaluations")
+        if n_fe_reported is not None:
+            n_fe_step = max(0, n_fe_reported - self._n_fe)
+        else:
+            n_fe_step = len(y_hist) if y_hist is not None else 0
 
         if new_best_y >= prev_best_y:
             self._stagnation_count += n_fe_step
@@ -267,20 +296,30 @@ class DASEnv(gym.Env):
 
         self._n_fe = result.get("n_function_evaluations", self._n_fe + n_fe_step)
 
-        # Accumulate population history for ELA
+        # Accumulate population history for ELA, capped at MAX_HISTORY_SAMPLE rows.
+        # Without the cap, large budgets (e.g. 40-dim × 10 000 FE) accumulate
+        # hundreds of thousands of rows — GBs of RAM for a single episode.
         if x_hist is not None and len(x_hist) > 0:
             self._x_history = (
-                x_hist
+                x_hist[-MAX_HISTORY_SAMPLE:]
                 if self._x_history is None
-                else np.concatenate([self._x_history, x_hist])
+                else np.concatenate([self._x_history, x_hist])[-MAX_HISTORY_SAMPLE:]
             )
             self._y_history = (
-                y_hist
+                y_hist[-MAX_HISTORY_SAMPLE:]
                 if self._y_history is None
-                else np.concatenate([self._y_history, y_hist])
+                else np.concatenate([self._y_history, y_hist])[-MAX_HISTORY_SAMPLE:]
             )
 
     def _build_observation(self) -> np.ndarray:
+        # Recompute ELA only when enough new samples have arrived.
+        # _ela_cache starts as zeros (correct before 50 samples) and is reset
+        # each episode, so stale features from a previous episode never leak in.
+        current_len = len(self._x_history) if self._x_history is not None else 0
+        if current_len >= 50 and current_len - self._ela_cache_len >= _ELA_RECOMPUTE_THRESHOLD:
+            self._ela_cache = compute_ela_features(self._x_history, self._y_history)
+            self._ela_cache_len = current_len
+
         return compute_observation(
             x_history=self._x_history,
             y_history=self._y_history,
@@ -291,4 +330,5 @@ class DASEnv(gym.Env):
             max_fe=max(self._max_fe, 1),
             stagnation_count=self._stagnation_count,
             ndim_problem=self._problem.dimension if self._problem is not None else 1,
+            ela=self._ela_cache,
         )
