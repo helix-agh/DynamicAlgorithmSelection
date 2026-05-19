@@ -36,6 +36,7 @@ dev = [
 
 [project.scripts]
 das-train = "train:main"
+das-cv = "cv:main"
 das-eval = "evaluate:main"
 rl-das-train = "train_rl_das:main"
 exp-das-train = "train_exp_das:main"
