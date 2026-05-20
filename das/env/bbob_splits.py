@@ -48,19 +48,15 @@ def get_train_test_split(mode: str, dims: list[int]) -> tuple[list[str], list[st
     return all_ids[:split], all_ids[split:]
 
 
-_N_CV_FOLDS = 3
-
-
 def get_cv_folds(
-    cv_mode: str, dims: list[int], seed: int = 0
+    cv_mode: str, dims: list[int], seed: int = 0, n_folds: int = 3
 ) -> list[tuple[list[str], list[str], str]]:
-    """Return (train_ids, test_ids, fold_tag) for each of the 3 CV folds.
+    """Return (train_ids, test_ids, fold_tag) for each CV fold.
 
-    LOIO: 3 folds – the 15 instance IDs are randomly shuffled and split into
-          3 groups of 5; each fold tests on 1 group and trains on the other 10.
-    LOPO: 3 folds – the 24 BBOB functions are randomly shuffled and split into
-          3 groups of 8; each fold tests on all problems from 1 group of
-          functions (all instances) and trains on the other 16 functions.
+    LOIO: instance IDs are shuffled and split into n_folds groups;
+          each fold tests on one group and trains on the rest.
+    LOPO: BBOB functions are shuffled and split into n_folds groups;
+          each fold tests on all problems from one group of functions.
     """
     rng = np.random.default_rng(seed)
     folds = []
@@ -68,8 +64,8 @@ def get_cv_folds(
     if cv_mode == "LOIO":
         insts = list(INSTANCE_IDS)
         rng.shuffle(insts)
-        chunk = len(insts) // _N_CV_FOLDS  # 5
-        for i in range(_N_CV_FOLDS):
+        chunk = len(insts) // n_folds
+        for i in range(n_folds):
             test_insts = insts[i * chunk : (i + 1) * chunk]
             train_insts = [inst for inst in insts if inst not in set(test_insts)]
             folds.append(
@@ -82,8 +78,8 @@ def get_cv_folds(
     else:  # LOPO
         fns = list(ALL_FUNCTIONS)
         rng.shuffle(fns)
-        chunk = len(fns) // _N_CV_FOLDS  # 8
-        for i in range(_N_CV_FOLDS):
+        chunk = len(fns) // n_folds
+        for i in range(n_folds):
             test_fns = set(fns[i * chunk : (i + 1) * chunk])
             train_fns = ALL_FUNCTIONS - test_fns
             folds.append(

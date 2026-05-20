@@ -297,6 +297,7 @@ dependencies = [
     { name = "pypop7" },
     { name = "rich" },
     { name = "stable-baselines3" },
+    { name = "torch" },
     { name = "tqdm" },
     { name = "wandb" },
 ]
@@ -320,6 +321,7 @@ requires-dist = [
     { name = "pypop7", specifier = ">=0.0.82,<0.0.83" },
     { name = "rich", specifier = ">=15.0.0" },
     { name = "stable-baselines3", specifier = ">=2.3.0" },
+    { name = "torch", specifier = ">=2.0.0" },
     { name = "tqdm", specifier = ">=4.67.1,<5" },
     { name = "wandb", specifier = ">=0.22.2,<0.23" },
 ]

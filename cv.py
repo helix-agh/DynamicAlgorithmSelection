@@ -1,29 +1,16 @@
-"""Unified training entry point for all DAS agents.
+"""Cross-validation entry point: train one model per fold, evaluate on held-out split.
 
 Usage
 -----
-    python train.py ppo     <name> [options]
-    python train.py rl-das  <name> [options]
-    python train.py exp-das <name> [options]
+    python cv.py ppo     <name> [options]
+    python cv.py rl-das  <name> [options]
+    python cv.py exp-das <name> [options]
 
-ppo outputs
------------
-    models/<name>.zip
-    models/<name>_vecnorm.pkl
-    results/<name>_eval.jsonl          (with --eval)
-
-rl-das outputs
---------------
-    models/<name>_final.pt
-    models/<name>_epoch<N>.pt
-    models/<name>_train_log.jsonl
-    results/<name>_eval.jsonl
-
-exp-das outputs
----------------
-    models/<name>_best.pt  /  _final.pt  /  _ep<N>.pt
-    models/<name>_train_log.jsonl
-    results/<name>_eval.jsonl
+Outputs (per fold)
+------------------
+    models/<name>_cv_<fold>.zip / _final.pt   trained model
+    results/<name>_cv_<fold>.jsonl            per-problem test results
+    results/<name>_cv_summary.jsonl           aggregated stats across all folds
 """
 
 import argparse
@@ -51,12 +38,6 @@ def _add_shared_args(p: argparse.ArgumentParser) -> None:
         help="Sub-optimizer names from the portfolio",
     )
     p.add_argument(
-        "--mode",
-        choices=["easy", "hard", "random"],
-        default="easy",
-        help="Train/test split strategy",
-    )
-    p.add_argument(
         "--fe-multiplier",
         type=int,
         default=10_000,
@@ -70,11 +51,25 @@ def _add_shared_args(p: argparse.ArgumentParser) -> None:
     )
     p.add_argument("--n-individuals", type=int, default=100, help="Population size")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument(
+        "--cv-mode",
+        default="LOIO",
+        choices=["LOIO", "LOPO"],
+        help="LOIO: hold out instances per fold; LOPO: hold out functions per fold",
+    )
+    p.add_argument("--n-folds", type=int, default=3, help="Number of CV folds")
+    p.add_argument(
+        "--folds",
+        nargs="+",
+        type=int,
+        default=None,
+        help="Zero-based fold indices to run (default: all)",
+    )
 
 
 def _parse_args() -> argparse.Namespace:
     root = argparse.ArgumentParser(
-        description="Train a DAS agent.  Choose an agent with a sub-command.",
+        description="Cross-validation for DAS agents.  Choose an agent with a sub-command.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     sub = root.add_subparsers(
@@ -84,7 +79,7 @@ def _parse_args() -> argparse.Namespace:
     # ---- PPO --------------------------------------------------------
     ppo = sub.add_parser(
         "ppo",
-        help="SB3 PPO with VecNormalize (multi-dim)",
+        help="SB3 PPO with VecNormalize",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     _add_shared_args(ppo)
@@ -113,17 +108,12 @@ def _parse_args() -> argparse.Namespace:
         "--n-epochs",
         type=int,
         default=20,
-        help="Passes over the full training set. total_timesteps = n_epochs × |train_ids| × n_checkpoints",
+        help="Training passes per fold. total_timesteps = n_epochs × |train_ids| × n_checkpoints",
     )
     ppo.add_argument(
         "-j", "--n-envs", type=int, default=1, help="Parallel training envs"
     )
     ppo.add_argument("--wandb", action="store_true", help="Log to Weights & Biases")
-    ppo.add_argument(
-        "--eval",
-        action="store_true",
-        help="Evaluate on the test set immediately after training",
-    )
 
     # ---- RL-DAS -----------------------------------------------------
     rl = sub.add_parser(
@@ -135,7 +125,7 @@ def _parse_args() -> argparse.Namespace:
     rl.add_argument(
         "--dim", type=int, default=10, help="Problem dimension (agent is dim-specific)"
     )
-    rl.add_argument("--n-epochs", type=int, default=20, help="Training epochs")
+    rl.add_argument("--n-epochs", type=int, default=20, help="Training epochs per fold")
     rl.add_argument(
         "--k-epoch",
         type=int,
@@ -150,10 +140,6 @@ def _parse_args() -> argparse.Namespace:
         "--save-interval", type=int, default=50, help="Checkpoint every N epochs"
     )
     rl.add_argument("--device", default="cpu", help="PyTorch device")
-    rl.add_argument(
-        "--no-eval", dest="eval", action="store_false", help="Skip final evaluation"
-    )
-    rl.set_defaults(eval=True)
 
     # ---- Exp-DAS ----------------------------------------------------
     exp = sub.add_parser(
@@ -189,10 +175,7 @@ def _parse_args() -> argparse.Namespace:
         "--n-epochs",
         type=int,
         default=3,
-        help="Passes over the training set. total_episodes = n_epochs × |train_ids|",
-    )
-    exp.add_argument(
-        "--eval-interval", type=int, default=100, help="Evaluate every N episodes"
+        help="Passes over the training set per fold. total_episodes = n_epochs × |train_ids|",
     )
     exp.add_argument(
         "--save-interval", type=int, default=500, help="Checkpoint every N episodes"
@@ -205,10 +188,6 @@ def _parse_args() -> argparse.Namespace:
         "--ppo-epochs", type=int, default=6, help="PPO gradient epochs per update"
     )
     exp.add_argument("--device", default="cpu", help="PyTorch device")
-    exp.add_argument(
-        "--no-eval", dest="eval", action="store_false", help="Skip final evaluation"
-    )
-    exp.set_defaults(eval=True)
 
     return root.parse_args()
 
@@ -225,17 +204,17 @@ def main() -> None:
     Path("results").mkdir(exist_ok=True)
 
     if args.agent == "ppo":
-        from das.training.ppo import run_ppo
+        from das.training.ppo import run_cv_ppo
 
-        run_ppo(args)
+        run_cv_ppo(args)
     elif args.agent == "rl-das":
-        from das.training.rldas import run_rl_das
+        from das.training.rldas import run_cv_rl_das
 
-        run_rl_das(args)
+        run_cv_rl_das(args)
     elif args.agent == "exp-das":
-        from das.training.expdas import run_exp_das
+        from das.training.expdas import run_cv_exp_das
 
-        run_exp_das(args)
+        run_cv_exp_das(args)
 
 
 if __name__ == "__main__":

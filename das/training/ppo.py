@@ -143,10 +143,6 @@ def run_ppo(args) -> None:
     print(f"Portfolio : {args.portfolio}")
     print(f"Budget    : {args.fe_multiplier}×dim  |  checkpoints={args.n_checkpoints}")
 
-    if args.cv_mode:
-        _run_cv(args, optimizers, cfg)
-        return
-
     train_ids, test_ids = get_train_test_split(args.mode, args.dims)
     print(
         f"Mode      : {args.mode}  ({len(train_ids)} train / {len(test_ids)} test problems)"
@@ -170,11 +166,25 @@ def run_ppo(args) -> None:
         print(f"  Results    : {out_path}")
 
 
-def _run_cv(args, optimizers: list, cfg: dict) -> None:
+def run_cv_ppo(args) -> None:
     from stable_baselines3 import PPO
 
+    optimizers = get_portfolio(args.portfolio)
+    cfg = {
+        "fe_multiplier": args.fe_multiplier,
+        "n_checkpoints": args.n_checkpoints,
+        "cdb": args.cdb,
+        "reward_option": args.reward_option,
+        "n_individuals": args.n_individuals,
+        "seed": args.seed,
+    }
+    print(f"Portfolio : {args.portfolio}")
+    print(f"Budget    : {args.fe_multiplier}×dim  |  checkpoints={args.n_checkpoints}")
+
     global_optima = load_global_optima()
-    all_folds = get_cv_folds(args.cv_mode, args.dims, seed=args.seed)
+    all_folds = get_cv_folds(
+        args.cv_mode, args.dims, seed=args.seed, n_folds=args.n_folds
+    )
     fold_indices = list(range(len(all_folds))) if args.folds is None else args.folds
 
     print(
