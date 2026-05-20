@@ -268,7 +268,7 @@ class ExpDASAgent:
     @classmethod
     def load(cls, path: str, obs_dim: int, n_actions: int, **kwargs) -> "ExpDASAgent":
         agent = cls(obs_dim, n_actions, **kwargs)
-        ckpt = torch.load(path, map_location=agent.device)
+        ckpt = torch.load(path, map_location=agent.device, weights_only=False)
         agent.actor.load_state_dict(ckpt["actor"])
         agent.critic.load_state_dict(ckpt["critic"])
         if "actor_opt" in ckpt:

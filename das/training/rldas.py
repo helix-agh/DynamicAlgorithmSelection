@@ -63,7 +63,7 @@ def run_rl_das(args) -> None:
 
     if args.eval:
         print("\nRunning final evaluation on test set …")
-        n_problems = len(test_env.problem_ids)
+        n_problems = len(test_env._problem_ids)
         test_results = evaluate(test_env, agent, n_episodes=n_problems)
         mean_best_y = float(np.mean([r["best_y"] for r in test_results]))
         print(f"Test mean best_y = {mean_best_y:.6e}")
