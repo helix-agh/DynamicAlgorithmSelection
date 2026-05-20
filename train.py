@@ -153,7 +153,11 @@ def _parse_args() -> argparse.Namespace:
     rl.add_argument(
         "--no-eval", dest="eval", action="store_false", help="Skip final evaluation"
     )
-    rl.set_defaults(eval=True)
+    rl.set_defaults(
+        eval=True,
+        portfolio=["NL_SHADE_RSP", "MADDE", "JDE21"],
+        n_individuals=170,
+    )
 
     # ---- Exp-DAS ----------------------------------------------------
     exp = sub.add_parser(

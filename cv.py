@@ -140,6 +140,10 @@ def _parse_args() -> argparse.Namespace:
         "--save-interval", type=int, default=50, help="Checkpoint every N epochs"
     )
     rl.add_argument("--device", default="cpu", help="PyTorch device")
+    rl.set_defaults(
+        portfolio=["NL_SHADE_RSP", "MADDE", "JDE21"],
+        n_individuals=170,
+    )
 
     # ---- Exp-DAS ----------------------------------------------------
     exp = sub.add_parser(
