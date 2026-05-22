@@ -9,14 +9,15 @@ PORTFOLIOS=(
 echo "Starting job submissions..."
 
 for SEED in "${SEEDS[@]}"; do
+
+    echo "Submitting RL-DAS study | SEED=$SEED"
+    sbatch rl_das_study.slurm $SEED
+    sleep 1
+
     for PORTFOLIO in "${PORTFOLIOS[@]}"; do
 
         echo "Submitting PPO study | SEED=$SEED | PORTFOLIO=$PORTFOLIO"
         sbatch ppo_study.slurm $SEED $PORTFOLIO
-        sleep 1
-
-        echo "Submitting RL-DAS study | SEED=$SEED | PORTFOLIO=$PORTFOLIO"
-        sbatch rl_das_study.slurm $SEED $PORTFOLIO
         sleep 1
 
         echo "Submitting Exp-DAS study | SEED=$SEED | PORTFOLIO=$PORTFOLIO"
