@@ -32,7 +32,7 @@ run_smoke() {
 if [ "$#" -gt 0 ]; then
     AGENTS=("$@")
 else
-    AGENTS=(ppo ppo-cv rl-das rl-das-cv exp-das exp-das-cv baselines)
+    AGENTS=(ppo ppo-cv rl-das rl-das-cv exp-das exp-das-cv exp-das-cv-par baselines)
 fi
 
 for agent in "${AGENTS[@]}"; do
@@ -42,7 +42,8 @@ for agent in "${AGENTS[@]}"; do
         rl-das)     run_smoke "rl-das train"  rl-das    ;;
         rl-das-cv)  run_smoke "rl-das cv"     rl-das-cv ;;
         exp-das)    run_smoke "exp-das train" exp-das   ;;
-        exp-das-cv) run_smoke "exp-das cv"    exp-das-cv;;
+        exp-das-cv)     run_smoke "exp-das cv"         exp-das-cv    ;;
+        exp-das-cv-par) run_smoke "exp-das cv parallel" exp-das-cv-par;;
         baselines)  run_smoke "baselines"     baselines ;;
         *)          echo "Unknown agent: $agent"; exit 1 ;;
     esac

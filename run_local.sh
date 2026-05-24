@@ -44,6 +44,10 @@ case "$AGENT" in
         python cv.py exp-das ${PORTFOLIO_STR}_EXPDAS_CV_LOCAL_SEED${SEED} \
             -p "${PORTFOLIO[@]}" --dims 2 --cv-mode LOIO --n-epochs 1 --seed $SEED --fe-multiplier 10  --n-checkpoints 3
         ;;
+    exp-das-cv-par)
+        python cv.py exp-das ${PORTFOLIO_STR}_EXPDAS_CV_PAR_LOCAL_SEED${SEED} \
+            -p "${PORTFOLIO[@]}" --dims 2 --cv-mode LOIO --n-epochs 1 --seed $SEED --fe-multiplier 10 --n-checkpoints 3 --n-jobs 2
+        ;;
     baselines)
         python baselines.py ${PORTFOLIO_STR}_BASELINES_LOCAL_SEED${SEED} \
             -p "${PORTFOLIO[@]}" --agent all -d 2 --seed $SEED  --fe-multiplier 10 --n-checkpoints 3
