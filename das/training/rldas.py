@@ -6,7 +6,6 @@ import os
 import numpy as np
 
 from das.env.bbob_splits import get_cv_folds, get_train_test_split
-from das.optimizers.portfolio import get_portfolio
 from das.training.common import write_jsonl
 
 
@@ -14,10 +13,9 @@ def run_rl_das(args) -> None:
     import cocoex as cx
     from agents.rl_das import RLDASEnv, PPOAgent
     from agents.rl_das import train, evaluate
+    from agents.rl_das.optimizers import get_rldas_portfolio
 
-    optimizers = get_portfolio(args.portfolio)
-    if not optimizers:
-        raise ValueError(f"Unknown optimizers: {args.portfolio}")
+    optimizers = get_rldas_portfolio(args.portfolio)
 
     train_ids, test_ids = get_train_test_split(args.mode, [args.dim])
     print(f"Train: {len(train_ids)} problems  |  Test: {len(test_ids)} problems")
@@ -63,7 +61,7 @@ def run_rl_das(args) -> None:
 
     if args.eval:
         print("\nRunning final evaluation on test set …")
-        n_problems = len(test_env.problem_ids)
+        n_problems = len(test_env._problem_ids)
         test_results = evaluate(test_env, agent, n_episodes=n_problems)
         mean_best_y = float(np.mean([r["best_y"] for r in test_results]))
         print(f"Test mean best_y = {mean_best_y:.6e}")
@@ -76,10 +74,9 @@ def run_cv_rl_das(args) -> None:
     import cocoex as cx
     from agents.rl_das import RLDASEnv, PPOAgent
     from agents.rl_das import train, evaluate
+    from agents.rl_das.optimizers import get_rldas_portfolio
 
-    optimizers = get_portfolio(args.portfolio)
-    if not optimizers:
-        raise ValueError(f"Unknown optimizers: {args.portfolio}")
+    optimizers = get_rldas_portfolio(args.portfolio)
 
     suite = cx.Suite("bbob", "", "")
 

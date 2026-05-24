@@ -41,15 +41,18 @@ warnings.filterwarnings("ignore")
 # ------------------------------------------------------------------ #
 
 
-def _add_shared_args(p: argparse.ArgumentParser) -> None:
+def _add_shared_args(
+    p: argparse.ArgumentParser, *, include_portfolio: bool = True
+) -> None:
     p.add_argument("name", help="Experiment name (used for output file names)")
-    p.add_argument(
-        "-p",
-        "--portfolio",
-        nargs="+",
-        default=["SPSO", "IPSO", "SPSOL"],
-        help="Sub-optimizer names from the portfolio",
-    )
+    if include_portfolio:
+        p.add_argument(
+            "-p",
+            "--portfolio",
+            nargs="+",
+            default=["SPSO", "IPSO", "SPSOL"],
+            help="Sub-optimizer names from the portfolio",
+        )
     p.add_argument(
         "--mode",
         choices=["easy", "hard", "random"],
@@ -131,7 +134,7 @@ def _parse_args() -> argparse.Namespace:
         help="Custom RL-DAS: single-dimension, pure-PyTorch PPO",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    _add_shared_args(rl)
+    _add_shared_args(rl, include_portfolio=False)
     rl.add_argument(
         "--dim", type=int, default=10, help="Problem dimension (agent is dim-specific)"
     )
@@ -153,7 +156,11 @@ def _parse_args() -> argparse.Namespace:
     rl.add_argument(
         "--no-eval", dest="eval", action="store_false", help="Skip final evaluation"
     )
-    rl.set_defaults(eval=True)
+    rl.set_defaults(
+        eval=True,
+        portfolio=["NL_SHADE_RSP", "MADDE", "JDE21"],
+        n_individuals=170,
+    )
 
     # ---- Exp-DAS ----------------------------------------------------
     exp = sub.add_parser(

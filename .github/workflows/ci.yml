@@ -31,6 +31,12 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev
 
+      - name: Ruff lint
+        run: uv run ruff format .
+
+      - name: Ruff check
+        run: uv run ruff check
+
       - name: Run pytest
         run: uv run pytest tests/ -v --tb=short
 
@@ -58,6 +64,7 @@ jobs:
 
       - name: Run smoke tests
         run: |
+          source .venv/bin/activate
           AGENTS="${{ inputs.smoke_agents }}"
           if [ -n "$AGENTS" ]; then
             bash smoke_test.sh $AGENTS

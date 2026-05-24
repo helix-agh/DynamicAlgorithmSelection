@@ -243,7 +243,7 @@ class PPOAgent:
     @classmethod
     def load(cls, path: str, dim: int, n_opt: int, **kwargs) -> "PPOAgent":
         agent = cls(dim, n_opt, **kwargs)
-        ckpt = torch.load(path, map_location=agent.device)
+        ckpt = torch.load(path, map_location=agent.device, weights_only=False)
         agent.actor.load_state_dict(ckpt["actor"])
         agent.critic.load_state_dict(ckpt["critic"])
         if "optimizer" in ckpt:

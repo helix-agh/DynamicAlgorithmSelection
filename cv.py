@@ -28,15 +28,18 @@ warnings.filterwarnings("ignore")
 # ------------------------------------------------------------------ #
 
 
-def _add_shared_args(p: argparse.ArgumentParser) -> None:
+def _add_shared_args(
+    p: argparse.ArgumentParser, *, include_portfolio: bool = True
+) -> None:
     p.add_argument("name", help="Experiment name (used for output file names)")
-    p.add_argument(
-        "-p",
-        "--portfolio",
-        nargs="+",
-        default=["SPSO", "IPSO", "SPSOL"],
-        help="Sub-optimizer names from the portfolio",
-    )
+    if include_portfolio:
+        p.add_argument(
+            "-p",
+            "--portfolio",
+            nargs="+",
+            default=["SPSO", "IPSO", "SPSOL"],
+            help="Sub-optimizer names from the portfolio",
+        )
     p.add_argument(
         "--fe-multiplier",
         type=int,
@@ -121,7 +124,7 @@ def _parse_args() -> argparse.Namespace:
         help="Custom RL-DAS: single-dimension, pure-PyTorch PPO",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    _add_shared_args(rl)
+    _add_shared_args(rl, include_portfolio=False)
     rl.add_argument(
         "--dim", type=int, default=10, help="Problem dimension (agent is dim-specific)"
     )
@@ -140,6 +143,10 @@ def _parse_args() -> argparse.Namespace:
         "--save-interval", type=int, default=50, help="Checkpoint every N epochs"
     )
     rl.add_argument("--device", default="cpu", help="PyTorch device")
+    rl.set_defaults(
+        portfolio=["NL_SHADE_RSP", "MADDE", "JDE21"],
+        n_individuals=170,
+    )
 
     # ---- Exp-DAS ----------------------------------------------------
     exp = sub.add_parser(
@@ -188,6 +195,13 @@ def _parse_args() -> argparse.Namespace:
         "--ppo-epochs", type=int, default=6, help="PPO gradient epochs per update"
     )
     exp.add_argument("--device", default="cpu", help="PyTorch device")
+    exp.add_argument(
+        "-j",
+        "--n-jobs",
+        type=int,
+        default=1,
+        help="Number of folds to run in parallel (default: 1 = sequential)",
+    )
 
     return root.parse_args()
 

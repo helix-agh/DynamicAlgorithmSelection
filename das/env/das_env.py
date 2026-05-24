@@ -158,6 +158,7 @@ class DASEnv(gym.Env):
             "best_y": self._best_y,
             "n_fe": self._n_fe,
             "checkpoint": self._checkpoint_idx,
+            "fitness_history_step": result.get("fitness_history", []),
         }
         return obs, reward, terminated, False, info
 

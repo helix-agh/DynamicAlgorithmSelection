@@ -29,12 +29,12 @@ case "$AGENT" in
             -p "${PORTFOLIO[@]}" -d 2 --cv-mode LOIO --n-epochs 1 --seed $SEED  --fe-multiplier 10  --n-checkpoints 3
         ;;
     rl-das)
-        python train.py rl-das ${PORTFOLIO_STR}_RLDAS_LOCAL_SEED${SEED} \
-            -p "${PORTFOLIO[@]}" --dim 2 --n-epochs 1 --seed $SEED --fe-multiplier 10  --n-checkpoints 3
+        python train.py rl-das NL_SHADE_RSP_MADDE_JDE21_RLDAS_LOCAL_SEED${SEED} \
+            --dim 2 --n-epochs 1 --seed $SEED --fe-multiplier 10 --n-checkpoints 3
         ;;
     rl-das-cv)
-        python cv.py rl-das ${PORTFOLIO_STR}_RLDAS_CV_LOCAL_SEED${SEED} \
-            -p "${PORTFOLIO[@]}" --dim 2 --cv-mode LOIO --n-epochs 1 --seed $SEED  --fe-multiplier 10  --n-checkpoints 3
+        python cv.py rl-das NL_SHADE_RSP_MADDE_JDE21_RLDAS_CV_LOCAL_SEED${SEED} \
+            --dim 2 --cv-mode LOIO --n-epochs 1 --seed $SEED --fe-multiplier 10 --n-checkpoints 3
         ;;
     exp-das)
         python train.py exp-das ${PORTFOLIO_STR}_EXPDAS_LOCAL_SEED${SEED} \
@@ -43,6 +43,10 @@ case "$AGENT" in
     exp-das-cv)
         python cv.py exp-das ${PORTFOLIO_STR}_EXPDAS_CV_LOCAL_SEED${SEED} \
             -p "${PORTFOLIO[@]}" --dims 2 --cv-mode LOIO --n-epochs 1 --seed $SEED --fe-multiplier 10  --n-checkpoints 3
+        ;;
+    exp-das-cv-par)
+        python cv.py exp-das ${PORTFOLIO_STR}_EXPDAS_CV_PAR_LOCAL_SEED${SEED} \
+            -p "${PORTFOLIO[@]}" --dims 2 --cv-mode LOIO --n-epochs 1 --seed $SEED --fe-multiplier 10 --n-checkpoints 3 --n-jobs 2
         ;;
     baselines)
         python baselines.py ${PORTFOLIO_STR}_BASELINES_LOCAL_SEED${SEED} \

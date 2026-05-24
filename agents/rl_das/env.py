@@ -1,18 +1,22 @@
-"""RL-DAS gymnasium environment.
+"""RL-DAS gymnasium environment (Population-based, 9-dim features).
 
-Observation space: flat Box of shape (6 + 2 * n_opt * dim,)
-  - [0:6]           six population-state features
-  - [6:]            movement history, 2*n_opt blocks of ``dim`` scalars each,
-                    interleaved as [best_0, worst_0, best_1, worst_1, ...]
+Strictly follows the original RL-DAS design (Guo et al., 2024):
+
+- A single mutable ``Population`` object is shared between DE sub-optimizers
+  as warm-started state (no get_data/set_data contract).
+- Portfolio is restricted to the three DE algorithms: NL_SHADE_RSP, JDE21, MadDE.
+- Observation: 9-dim population-state features (computed with local sampling)
+  concatenated with per-optimizer movement history embeddings of shape (dim,).
+
+Observation layout: flat Box of shape (9 + 2 * n_opt * dim,)
+  [0:9]    nine population-state features (see _pop_features)
+  [9:]     movement history, 2*n_opt blocks of dim scalars each,
+           interleaved as [best_0, worst_0, best_1, worst_1, ...]
 
 Action space: Discrete(n_opt)
 
-Reward: max(0, (prev_best - new_best) / cost_scale)  — non-negative improvement
-        normalised by the initial global-best cost so rewards are comparable
-        across problems with different fitness scales.
-
-The environment operates on BBOB problems accessed through a cocoex Suite.
-Only problems whose dimension matches ``dim`` are used; others are skipped.
+Reward: max(0, (prev_best - new_best) / cost_scale)  non-negative improvement
+        normalised by the initial global-best cost.
 """
 
 from __future__ import annotations
@@ -23,68 +27,136 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 
+from agents.rl_das.population import Population
 from das.optimizers.base import get_checkpoints
 
 
 # ---------------------------------------------------------------------------
-# Population-state feature extraction (6-D, dimension-independent)
+# Feature helper functions (adapted from original RL-DAS utils.py)
 # ---------------------------------------------------------------------------
 
 
+def _cal_fdc(group_norm: np.ndarray, costs: np.ndarray) -> float:
+    """Fitness-distance correlation. group_norm must be in [0, 1]^dim."""
+    opt_x = group_norm[np.argmin(costs)]
+    ds = np.sum((group_norm - opt_x) ** 2, axis=1)
+    fs = 1.0 / (costs + 1e-8)
+    C_fd = ((fs - fs.mean()) * (ds - ds.mean())).mean()
+    delta_f = ((fs - fs.mean()) ** 2).mean()
+    delta_d = ((ds - ds.mean()) ** 2).mean()
+    return float(C_fd / (delta_d * delta_f + 1e-8))
+
+
+def _dispersion(group_norm: np.ndarray, costs: np.ndarray) -> tuple[float, float]:
+    """Dispersion and dispersion-ratio metrics. group_norm in [0, 1]^dim."""
+    gs, dim = group_norm.shape
+    group_sorted = group_norm[np.argsort(costs)]
+    diam = float(np.sqrt(dim))
+    disp = 0.0
+    max_dis = 0.0
+    for i in range(1, gs):
+        shift = np.concatenate((group_sorted[i:], group_sorted[:i]), 0)
+        distances = np.sqrt(np.sum((group_sorted - shift) ** 2, -1))
+        disp += float(np.sum(distances))
+        cur_max = float(np.max(distances))
+        if cur_max > max_dis:
+            max_dis = cur_max
+    disp /= gs**2
+    gs10 = max(gs * 10 // 100, 1)
+    top10 = group_sorted[:gs10]
+    disp10 = 0.0
+    for i in range(1, gs10):
+        shift = np.concatenate((top10[i:], top10[:i]), 0)
+        disp10 += float(np.sum(np.sqrt(np.sum((top10 - shift) ** 2, -1))))
+    if gs10 > 1:
+        disp10 /= gs10**2
+    return float(disp10 - disp), float(max_dis / (diam + 1e-10))
+
+
+def _negative_slope_coefficient(
+    group_cost: np.ndarray, sample_cost: np.ndarray
+) -> float:
+    """Negative slope coefficient (NSC)."""
+    gs = sample_cost.shape[0]
+    m = 10
+    gs -= gs % m
+    if gs < m:
+        return 0.0
+    pairs = sorted(zip(group_cost[:gs].tolist(), sample_cost[:gs].tolist()))
+    arr = np.array(pairs)
+    sorted_group = arr[:, 0].reshape(m, -1)
+    sorted_sample = arr[:, 1].reshape(m, -1)
+    Ms = np.mean(sorted_group, -1)
+    Ns = np.mean(sorted_sample, -1)
+    nsc = np.minimum((Ns[1:] - Ns[:-1]) / (Ms[1:] - Ms[:-1] + 1e-8), 0)
+    return float(np.sum(nsc))
+
+
+def _average_neutral_ratio(
+    group_cost: np.ndarray, sample_costs: np.ndarray, eps: float = 1.0
+) -> float:
+    """Average neutral ratio (ANR)."""
+    gs = sample_costs.shape[1]
+    dcost = np.fabs(sample_costs - group_cost[:gs])
+    return float(np.mean(np.sum(dcost < eps, axis=0) / sample_costs.shape[0]))
+
+
+def _non_improvable_worsenable(
+    group_cost: np.ndarray, sample_costs: np.ndarray
+) -> tuple[float, float]:
+    """Non-improvable (NI) and non-worsenable (NW) ratios."""
+    gs = sample_costs.shape[1]
+    NI = (
+        1.0
+        - np.count_nonzero(np.sum(group_cost[:gs] > sample_costs, axis=-1))
+        / sample_costs.shape[0]
+    )
+    NW = (
+        1.0
+        - np.count_nonzero(np.sum(group_cost[:gs] < sample_costs, axis=-1))
+        / sample_costs.shape[0]
+    )
+    return float(NI), float(NW)
+
+
 def _pop_features(
-    x: np.ndarray,
-    y: np.ndarray,
-    gbest_y: float,
+    population: Population,
+    sample_costs: np.ndarray,
     cost_scale: float,
-    n_fes: int,
-    max_fes: int,
+    n_fe: int,
+    max_fe: int,
 ) -> np.ndarray:
-    """Return a 6-D population-state feature vector.
+    """Return 9-dim feature vector matching original RL-DAS Population.get_feature.
 
-    Features
-    --------
-    gbc       : normalised global-best cost
-    fdc       : fitness–distance correlation
-    disp      : mean distance to centroid (dispersion)
-    disp_ratio: dispersion / search-space range
-    nsc       : negative slope coefficient (distance vs fitness)
-    progress  : n_fes / max_fes
+    Features (in order):
+      gbc        normalised global-best cost
+      fdc        fitness-distance correlation
+      disp       dispersion (disp10 - disp_all)
+      disp_ratio max_pairwise_dist / sqrt(dim)
+      nsc        negative slope coefficient
+      anr        average neutral ratio
+      ni         non-improvable ratio
+      nw         non-worsenable ratio
+      progress   n_fe / max_fe
     """
-    NP = len(y)
+    group = population.group
+    cost = population.cost
+    lb = population.Xmin
+    ub = population.Xmax
 
-    # 1. Normalised global best
-    gbc = float(gbest_y / cost_scale) if cost_scale > 1e-10 else 0.0
+    group_norm = (group - lb) / (ub - lb + 1e-10)
 
-    # 2. Fitness–distance correlation
-    gbest_x = x[int(np.argmin(y))]
-    dists = np.linalg.norm(x - gbest_x, axis=1)
-    if dists.std() > 1e-10 and y.std() > 1e-10 and NP > 2:
-        fdc = float(np.corrcoef(dists, y)[0, 1])
-    else:
-        fdc = 0.0
+    gbc = float(population.gbest / (cost_scale + 1e-10))
+    fdc = _cal_fdc(group_norm, cost / (cost_scale + 1e-10))
+    disp, disp_ratio = _dispersion(group_norm, cost)
+    nsc = _negative_slope_coefficient(cost, sample_costs[0])
+    anr = _average_neutral_ratio(cost, sample_costs)
+    ni, nw = _non_improvable_worsenable(cost, sample_costs)
+    progress = float(n_fe / max(max_fe, 1))
 
-    # 3. Dispersion metrics
-    centroid = x.mean(axis=0)
-    disp_dists = np.linalg.norm(x - centroid, axis=1)
-    disp = float(disp_dists.mean())
-    spread = float(np.ptp(x))
-    disp_ratio = disp / (spread + 1e-10)
-
-    # 4. Negative slope coefficient
-    if dists.std() > 1e-10 and NP > 2:
-        try:
-            slope = float(np.polyfit(dists, y, 1)[0])
-            nsc = -slope if np.isfinite(slope) else 0.0
-        except (np.linalg.LinAlgError, ValueError):
-            nsc = 0.0
-    else:
-        nsc = 0.0
-
-    # 5. Progress
-    progress = float(n_fes / max(max_fes, 1))
-
-    out = np.array([gbc, fdc, disp, disp_ratio, nsc, progress], dtype=np.float32)
-    # Guard against any NaN/inf that could corrupt the network weights
+    out = np.array(
+        [gbc, fdc, disp, disp_ratio, nsc, anr, ni, nw, progress], dtype=np.float32
+    )
     return np.nan_to_num(out, nan=0.0, posinf=1.0, neginf=-1.0)
 
 
@@ -96,33 +168,34 @@ def _pop_features(
 class RLDASEnv(gym.Env):
     """RL-DAS environment wrapping BBOB problems via a cocoex Suite.
 
+    Uses a Population object as shared warm-started state across all DE
+    sub-optimizers (matching the original RL-DAS design).
+
     Parameters
     ----------
     problem_ids:
-        BBOB problem IDs to cycle through (one per episode).  Only IDs whose
-        dimension matches ``dim`` are used.
+        BBOB problem IDs to cycle through (one per episode).
     suite:
         cocoex Suite object.
     optimizers:
-        Ordered list of sub-optimizer classes (same pypop7-compatible classes
-        as used in DASEnv — defines the action space).
+        List of instantiated DE optimizer objects (NL_SHADE_RSP, JDE21, MadDE).
     dim:
-        Problem dimension.  The movement embeddings have shape (dim,), so the
-        agent is dimension-specific.
+        Problem dimension.
     fe_multiplier:
         Budget = fe_multiplier * dim.
     n_checkpoints:
         Number of optimizer-selection steps per episode.
     checkpoint_division_base:
-        cdb=1.0 → uniform checkpoints; cdb>1.0 → exponentially growing.
+        1.0 → uniform checkpoints; >1.0 → exponentially growing.
     n_individuals:
-        Population size.
+        Initial population size (Nmax).
     seed:
-        Seed for deterministic optimizer RNGs (passed to pypop7 as seed_rng).
+        Unused (kept for API compatibility with other DAS envs).
     """
 
     metadata = {"render_modes": []}
-    N_FEATURES = 6
+    N_FEATURES = 9
+    SAMPLE_TIMES = 2
 
     def __init__(
         self,
@@ -138,19 +211,17 @@ class RLDASEnv(gym.Env):
     ):
         super().__init__()
 
-        # Filter to matching dimension (BBOB IDs end with _d{dim:02d})
         self._problem_ids = [pid for pid in problem_ids if pid.endswith(f"_d{dim:02d}")]
         if not self._problem_ids:
             raise ValueError(f"No problem_ids match dimension {dim}.")
 
         self.suite = suite
-        self.optimizers = optimizers
+        self._optimizers = optimizers
         self.dim = dim
         self.fe_multiplier = fe_multiplier
         self.n_checkpoints = n_checkpoints
         self.cdb = checkpoint_division_base
         self.n_individuals = n_individuals
-        self._seed = seed
 
         self.n_opt = len(optimizers)
         obs_dim = self.N_FEATURES + 2 * self.n_opt * dim
@@ -160,28 +231,14 @@ class RLDASEnv(gym.Env):
         )
         self.action_space = spaces.Discrete(self.n_opt)
 
-        # Episode state
         self._problem = None
         self._problem_idx = 0
         self._max_fe = 0
         self._n_fe = 0
         self._checkpoints: np.ndarray | None = None
         self._checkpoint_idx = 0
-
-        # Current population arrays (shared warm-start state)
-        self._pop_x: np.ndarray | None = None
-        self._pop_y: np.ndarray | None = None
-        self._optimizer_state: dict = {}
-
-        # Global best tracking
-        self._gbest_y: float = np.inf
-        self._gbest_x: np.ndarray | None = None
+        self._population: Population | None = None
         self._cost_scale: float = 1.0
-        self._worst_y: float = -np.inf
-        self._initial_range: tuple[float, float] = (np.inf, -np.inf)
-
-        # Movement history: list of accumulated movement vectors per optimizer
-        # shape: (n_opt,) lists of (dim,) arrays; averaged in observation
         self._best_history: list[list[np.ndarray]] = [[] for _ in range(self.n_opt)]
         self._worst_history: list[list[np.ndarray]] = [[] for _ in range(self.n_opt)]
 
@@ -194,24 +251,20 @@ class RLDASEnv(gym.Env):
 
         problem_id = self._problem_ids[self._problem_idx % len(self._problem_ids)]
         self._problem_idx += 1
-
         self._problem = self.suite.get_problem(problem_id)
+
+        lb = float(self._problem.lower_bounds[0])
+        ub = float(self._problem.upper_bounds[0])
         self._max_fe = self.fe_multiplier * self.dim
         self._checkpoints = get_checkpoints(
             self.n_checkpoints, self._max_fe, self.n_individuals, self.cdb
         )
-
-        self._n_fe = 0
         self._checkpoint_idx = 0
-        self._optimizer_state = {}
-        self._pop_x = None
-        self._pop_y = None
 
-        self._gbest_y = np.inf
-        self._gbest_x = None
-        self._cost_scale = 1.0
-        self._worst_y = -np.inf
-        self._initial_range = (np.inf, -np.inf)
+        self._population = Population(self.dim, lb, ub, Nmax=self.n_individuals)
+        self._population.initialize_costs(self._problem)
+        self._cost_scale = max(float(self._population.gbest), 1e-10)
+        self._n_fe = self._population.NP
 
         self._best_history = [[] for _ in range(self.n_opt)]
         self._worst_history = [[] for _ in range(self.n_opt)]
@@ -223,143 +276,84 @@ class RLDASEnv(gym.Env):
         assert self._problem is not None, "Call reset() before step()"
 
         target_fe = int(self._checkpoints[self._checkpoint_idx])
-        prev_gbest = self._gbest_y
+        prev_gbest = self._population.gbest
 
-        # Record pre-step best/worst positions for movement computation
-        prev_best_x, prev_worst_x = self._get_best_worst_positions()
+        prev_best_x = self._population.gbest_solution.copy()
+        worst_idx = int(np.argmax(self._population.cost))
+        prev_worst_x = self._population.group[worst_idx].copy()
 
-        result = self._run_optimizer(action, target_fe)
-        self._update_state(result)
+        self._population, _, end_fes = self._optimizers[action].step(
+            self._population, self._problem, self._n_fe, target_fe, self._max_fe
+        )
+        self._n_fe = end_fes
 
-        # Compute movement for the chosen optimizer
-        new_best_x, new_worst_x = self._get_best_worst_positions()
-        best_move = (new_best_x - prev_best_x) / (self.dim**0.5 + 1e-10)
-        worst_move = (new_worst_x - prev_worst_x) / (self.dim**0.5 + 1e-10)
-        self._best_history[action].append(best_move)
-        self._worst_history[action].append(worst_move)
+        new_best_x = self._population.gbest_solution.copy()
+        new_worst_x = self._population.group[
+            int(np.argmax(self._population.cost))
+        ].copy()
+        scale = float(self.dim**0.5) + 1e-10
+        self._best_history[action].append((new_best_x - prev_best_x) / scale)
+        self._worst_history[action].append((new_worst_x - prev_worst_x) / scale)
 
         self._checkpoint_idx += 1
         terminated = (
             self._checkpoint_idx >= self.n_checkpoints or self._n_fe >= self._max_fe
         )
 
-        improvement = (
-            max(0.0, prev_gbest - self._gbest_y)
-            if np.isfinite(prev_gbest) and np.isfinite(self._gbest_y)
-            else 0.0
+        reward = float(
+            max(0.0, (prev_gbest - self._population.gbest) / (self._cost_scale + 1e-10))
         )
-        reward = float(improvement / (self._cost_scale + 1e-10))
-        if not np.isfinite(reward):
-            reward = 0.0
 
         obs = self._build_observation()
-        info = {"best_y": self._gbest_y, "n_fe": self._n_fe}
-        return obs, reward, terminated, False, info
-
-    # ------------------------------------------------------------------
-    # Optimizer execution (reuses pypop7 warm-start machinery)
-    # ------------------------------------------------------------------
-
-    def _run_optimizer(self, action: int, target_fe: int) -> dict:
-        optimizer_class = self.optimizers[action]
-        problem_config = {
-            "fitness_function": self._problem,
-            "ndim_problem": self.dim,
-            "lower_boundary": self._problem.lower_bounds,
-            "upper_boundary": self._problem.upper_bounds,
-        }
-        options = {
-            "max_function_evaluations": self._max_fe,
-            "target_fe": target_fe,
-            "n_individuals": self.n_individuals,
-            "best_so_far_y": self._gbest_y,
-            "verbose": False,
-        }
-        if self._seed is not None:
-            options["seed_rng"] = (
-                self._seed * 1_000_000
-                + self._problem_idx * 1_000
-                + self._checkpoint_idx
-            ) % (2**31)
-
-        optimizer = optimizer_class(problem_config, options)
-        optimizer.n_function_evaluations = self._n_fe
-        optimizer.set_data(
-            best_x=self._gbest_x,
-            best_y=self._gbest_y if self._gbest_y < np.inf else None,
-            **self._optimizer_state,
+        return (
+            obs,
+            reward,
+            terminated,
+            False,
+            {"best_y": self._population.gbest, "n_fe": self._n_fe},
         )
-        result = optimizer.optimize()
-        if isinstance(result, tuple):
-            result = result[0]
 
-        new_state = optimizer.get_data()
-        if new_state:
-            self._optimizer_state = new_state
-        elif len(optimizer.x_history) > 0:
-            self._optimizer_state = {
-                "x": np.array(optimizer.x_history[-self.n_individuals :]),
-                "y": np.array(optimizer.y_history[-self.n_individuals :]),
-            }
+    # ------------------------------------------------------------------
+    # Local sampling (counts FEs toward budget)
+    # ------------------------------------------------------------------
 
-        # Update cached population arrays
-        if "x" in self._optimizer_state:
-            self._pop_x = self._optimizer_state["x"]
-            self._pop_y = self._optimizer_state["y"]
+    def _local_sample(self) -> np.ndarray:
+        """Run SAMPLE_TIMES independent trials on a deepcopy of the population.
 
-        return result
-
-    def _update_state(self, result: dict) -> None:
-        new_best_y: float = result.get("best_so_far_y", np.inf)
-        new_best_x: np.ndarray | None = result.get("best_so_far_x")
-        worst_y: float = result.get("worst_so_far_y", -np.inf)
-
-        if new_best_y < self._gbest_y:
-            self._gbest_y = new_best_y
-            self._gbest_x = new_best_x
-
-        if worst_y > self._worst_y:
-            self._worst_y = worst_y
-
-        if self._initial_range[0] == np.inf:
-            self._initial_range = (new_best_y, max(worst_y, new_best_y + 1e-5))
-            self._cost_scale = max(abs(new_best_y), 1e-10)
-
-        y_hist = result.get("y_history")
-        n_fe_step = len(y_hist) if y_hist is not None else 0
-        self._n_fe = result.get("n_function_evaluations", self._n_fe + n_fe_step)
+        Returns
+        -------
+        sample_costs : ndarray of shape (SAMPLE_TIMES, min_NP)
+        """
+        sample_size = self._population.NP
+        costs = []
+        min_len = sample_size
+        for _ in range(self.SAMPLE_TIMES):
+            pop_copy = copy.deepcopy(self._population)
+            opt = self._optimizers[np.random.randint(self.n_opt)]
+            popped, _, _ = opt.step(
+                pop_copy,
+                self._problem,
+                self._n_fe,
+                self._n_fe + sample_size,
+                self._max_fe,
+            )
+            costs.append(popped.cost.copy())
+            if popped.cost.shape[0] < min_len:
+                min_len = popped.cost.shape[0]
+        self._n_fe = min(self._n_fe + sample_size * self.SAMPLE_TIMES, self._max_fe)
+        return np.array([c[:min_len] for c in costs])
 
     # ------------------------------------------------------------------
     # Observation construction
     # ------------------------------------------------------------------
 
-    def _get_best_worst_positions(self) -> tuple[np.ndarray, np.ndarray]:
-        """Return current best and worst particle positions."""
-        if self._pop_x is None or len(self._pop_x) == 0:
-            zeros = np.zeros(self.dim, dtype=np.float32)
-            return zeros, zeros
-        best_idx = int(np.argmin(self._pop_y))
-        worst_idx = int(np.argmax(self._pop_y))
-        return self._pop_x[best_idx].astype(np.float32), self._pop_x[worst_idx].astype(
-            np.float32
+    def _build_observation(self) -> np.ndarray:
+        sample_costs = self._local_sample()
+        features = _pop_features(
+            self._population, sample_costs, self._cost_scale, self._n_fe, self._max_fe
         )
 
-    def _build_observation(self) -> np.ndarray:
-        # Population-state features
-        if self._pop_x is not None and len(self._pop_x) > 0:
-            features = _pop_features(
-                self._pop_x,
-                self._pop_y,
-                self._gbest_y,
-                self._cost_scale,
-                self._n_fe,
-                self._max_fe,
-            )
-        else:
-            features = np.zeros(self.N_FEATURES, dtype=np.float32)
-
-        # Per-optimizer movement history (averaged, or zero if unused)
-        movements = []
+        movements: list[np.ndarray] = []
         for k in range(self.n_opt):
             if self._best_history[k]:
                 best_emb = np.mean(self._best_history[k], axis=0).astype(np.float32)

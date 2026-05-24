@@ -12,9 +12,7 @@ import argparse
 import json
 import os
 import warnings
-from itertools import product
 
-import cocoex
 import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import VecNormalize
@@ -22,34 +20,11 @@ from stable_baselines3.common.env_util import make_vec_env
 from tqdm import tqdm
 
 from das.env.bbob_splits import ALL_DIMS, get_train_test_split
-from das.env.das_env import DASEnv
 from das.optimizers.portfolio import get_portfolio
 from das.utils import set_seed
-from das.training.common import load_global_optima, make_das_env
+from das.training.common import compute_run_stats, load_global_optima, make_das_env
 
 warnings.filterwarnings("ignore")
-
-
-# ------------------------------------------------------------------ #
-# AOCC metric                                                          #
-# ------------------------------------------------------------------ #
-
-
-def aocc(
-    fitness_history: list[tuple[int, float]], max_fe: int, optimum: float
-) -> float:
-    lb, ub = -8.0, 8.0
-    area, prev_fe = 0.0, 0
-    for fe, f in fitness_history:
-        v = np.clip(f - optimum, 1e-8, 1e8)
-        area += (1.0 - (np.log10(v) - lb) / (ub - lb)) * (fe - prev_fe)
-        prev_fe = fe
-    if fitness_history:
-        last_v = np.clip(fitness_history[-1][1] - optimum, 1e-8, 1e8)
-        area += (1.0 - (np.log10(last_v) - lb) / (ub - lb)) * (
-            max_fe - fitness_history[-1][0]
-        )
-    return area / max_fe
 
 
 # ------------------------------------------------------------------ #
@@ -110,42 +85,37 @@ def main():
         eval_env.norm_reward = False
 
     global_optima = load_global_optima()
-    observer = (
-        cocoex.Observer("bbob", f"result_folder: {args.name}") if args.coco else None
-    )
 
     out_path = os.path.join("results", f"{args.name}_eval.jsonl")
     results_all = []
 
     for problem_id in tqdm(test_ids, smoothing=0.0):
-        # Run one episode
         obs = eval_env.reset()
         done = [False]
-        info = {}
+        fitness_history: list[tuple[int, float]] = []
+        step_info: dict = {}
         while not done[0]:
             action, _ = model.predict(obs, deterministic=True)
             obs, _, done, infos = eval_env.step(action)
-            if done[0]:
-                info = infos[0]
+            step_info = infos[0]
+            fitness_history.extend(step_info.get("fitness_history_step", []))
 
-        best_y = info.get("best_y", float("inf"))
-        optimum = global_optima.get(problem_id, 0.0)
-        record = {
-            "problem_id": problem_id,
-            "best_y": best_y,
-            "gap": best_y - optimum,
-        }
-        results_all.append(record)
+        max_fe = step_info.get("n_fe", 0)
+        global_minimum = global_optima.get(problem_id, 0.0)
+        stats = compute_run_stats(fitness_history, max_fe, global_minimum)
+        results_all.append({problem_id: stats})
 
     with open(out_path, "w") as f:
         for r in results_all:
             f.write(json.dumps(r) + "\n")
 
-    gaps = [r["gap"] for r in results_all]
+    metrics = [next(iter(r.values())) for r in results_all]
     print(f"\nEvaluation complete  ({len(results_all)} problems)")
-    print(f"  Mean gap  : {np.mean(gaps):.4e}")
-    print(f"  Median gap: {np.median(gaps):.4e}")
-    print(f"  Results   : {out_path}")
+    print(
+        f"  Mean final_fitness  : {np.mean([m['final_fitness'] for m in metrics]):.4e}"
+    )
+    print(f"  Mean AOCC           : {np.mean([m['aocc'] for m in metrics]):.4f}")
+    print(f"  Results             : {out_path}")
 
 
 if __name__ == "__main__":

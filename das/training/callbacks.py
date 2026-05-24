@@ -9,11 +9,10 @@ from __future__ import annotations
 
 import json
 import os
-from itertools import product
 from typing import Any
 
 import numpy as np
-from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
+from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import VecEnv
 
 try:
@@ -124,7 +123,7 @@ class DASEvalCallback(BaseCallback):
         return True
 
     def _evaluate(self):
-        aoccs, best_ys = [], []
+        best_ys = []
         obs = self.eval_env.reset()
 
         for _ in range(self.n_eval_episodes):

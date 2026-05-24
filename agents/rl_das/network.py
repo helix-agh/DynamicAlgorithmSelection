@@ -6,13 +6,13 @@ concatenated representation through a small MLP.
 
 Architecture (following Guo et al. 2024):
 
-  Input: flat obs = [features_6d | best_move_0_dim | worst_move_0_dim | ...]
+  Input: flat obs = [features_9d | best_move_0_dim | worst_move_0_dim | ...]
 
   For each of the 2*n_opt movement blocks:
       embedder_k : Linear(dim, 64) -> ReLU -> Linear(64, 1) -> ReLU
 
-  backbone_input = cat(features_6d, *[emb_k(move_k) for k])   shape: (6+2*n_opt,)
-  backbone       : Linear(6+2*n_opt, 64) -> Tanh -> Linear(64, 16) -> Tanh
+  backbone_input = cat(features_9d, *[emb_k(move_k) for k])   shape: (9+2*n_opt,)
+  backbone       : Linear(9+2*n_opt, 64) -> Tanh -> Linear(64, 16) -> Tanh
 
   Actor head  : Linear(16, n_opt) -> Softmax
   Critic head : Linear(16, 1)
@@ -42,7 +42,7 @@ class _MovementEmbedder(nn.Module):
 class _RLDASBackbone(nn.Module):
     """Shared feature extractor used by both Actor and Critic."""
 
-    N_FEATURES = 6  # must match env.RLDASEnv.N_FEATURES
+    N_FEATURES = 9  # must match env.RLDASEnv.N_FEATURES
 
     def __init__(self, dim: int, n_opt: int) -> None:
         super().__init__()

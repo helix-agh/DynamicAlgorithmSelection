@@ -27,7 +27,7 @@ Usage
 
 Outputs
 -------
-    results/<name>_<agent_tag>.jsonl     per-problem {problem_id, agent, best_y, gap}
+    results/<name>_<agent_tag>.jsonl     per-problem {problem_id: {area_under_optimization_curve, aocc, final_fitness, agent}}
     results/<name>_baselines_summary.jsonl   aggregate comparison (when --agent all)
 """
 
@@ -35,7 +35,6 @@ import argparse
 import json
 import os
 import warnings
-from itertools import product
 
 import cocoex
 import numpy as np
@@ -45,7 +44,7 @@ from das.env.das_env import DASEnv
 from das.optimizers.portfolio import get_portfolio
 from das.utils import set_seed
 from das.env.bbob_splits import ALL_DIMS, get_train_test_split
-from das.training.common import load_global_optima
+from das.training.common import compute_run_stats, load_global_optima
 
 warnings.filterwarnings("ignore")
 
@@ -71,15 +70,22 @@ def fixed_policy(action: int):
 # ------------------------------------------------------------------ #
 
 
-def run_episode(env: DASEnv, policy_fn) -> dict:
-    """Run one complete episode; return the final info dict."""
-    obs, info = env.reset()
+def run_episode(env: DASEnv, policy_fn) -> tuple[dict, list[tuple[int, float]]]:
+    """Run one complete episode.
+
+    Returns the final step-info dict and the full best-so-far improvement
+    history accumulated across all checkpoints (exact AOCC input).
+    """
+    obs, _ = env.reset()
     done = False
+    step_info: dict = {}
+    fitness_history: list[tuple[int, float]] = []
     while not done:
         action = policy_fn(obs, env.action_space.n)
-        obs, _, terminated, truncated, info = env.step(action)
+        obs, _, terminated, truncated, step_info = env.step(action)
         done = terminated or truncated
-    return info
+        fitness_history.extend(step_info.get("fitness_history_step", []))
+    return step_info, fitness_history
 
 
 def collect_env_results(
@@ -104,17 +110,11 @@ def collect_env_results(
     )
     results = []
     for problem_id in tqdm(test_ids, desc=f"  {agent_tag}", smoothing=0.0):
-        info = run_episode(env, policy_fn)
-        best_y = info.get("best_y", float("inf"))
-        optimum = global_optima.get(problem_id, 0.0)
-        results.append(
-            {
-                "problem_id": problem_id,
-                "agent": agent_tag,
-                "best_y": best_y,
-                "gap": best_y - optimum,
-            }
-        )
+        step_info, fitness_history = run_episode(env, policy_fn)
+        max_fe = step_info.get("n_fe", 0)
+        global_minimum = global_optima.get(problem_id, 0.0)
+        stats = compute_run_stats(fitness_history, max_fe, global_minimum)
+        results.append({problem_id: {**stats, "agent": agent_tag}})
     env.close()
     return results
 
@@ -125,9 +125,17 @@ def collect_env_results(
 
 
 def run_single_algorithm(
-    optimizer_class, problem, fe_multiplier: int, n_individuals: int
-) -> float:
-    """Run one optimizer for the full budget in one uninterrupted call."""
+    optimizer_class,
+    problem,
+    fe_multiplier: int,
+    n_individuals: int,
+    global_minimum: float = 0.0,
+) -> dict[str, float]:
+    """Run one optimizer for the full budget in one uninterrupted call.
+
+    Returns a stats dict with area_under_optimization_curve, aocc, and final_fitness.
+    Uses the optimizer's exact fitness_history (improvement points) for AOCC.
+    """
     max_fe = fe_multiplier * problem.dimension
     problem_config = {
         "fitness_function": problem,
@@ -145,7 +153,8 @@ def run_single_algorithm(
     result = optimizer.optimize()
     if isinstance(result, tuple):
         result = result[0]
-    return float(result.get("best_so_far_y", float("inf")))
+    fitness_history = result.get("fitness_history", [])
+    return compute_run_stats(fitness_history, max_fe, global_minimum)
 
 
 def collect_single_results(
@@ -161,18 +170,11 @@ def collect_single_results(
     results = []
     for problem_id in tqdm(test_ids, desc=f"  {agent_tag}", smoothing=0.0):
         problem = suite.get_problem(problem_id)
-        best_y = run_single_algorithm(
-            optimizer_class, problem, fe_multiplier, n_individuals
+        global_minimum = global_optima.get(problem_id, 0.0)
+        stats = run_single_algorithm(
+            optimizer_class, problem, fe_multiplier, n_individuals, global_minimum
         )
-        optimum = global_optima.get(problem_id, 0.0)
-        results.append(
-            {
-                "problem_id": problem_id,
-                "agent": agent_tag,
-                "best_y": best_y,
-                "gap": best_y - optimum,
-            }
-        )
+        results.append({problem_id: {**stats, "agent": agent_tag}})
     return results
 
 
@@ -192,38 +194,45 @@ def compute_oracle(all_results: dict[str, list[dict]]) -> tuple[list[dict], list
     -------
     oracle_best, oracle_worst: per-problem dicts annotated with winning agent
     """
-    # Index by problem_id
-    by_problem: dict[str, list[dict]] = {}
+    by_problem: dict[str, list[tuple[str, dict]]] = {}
     for tag, records in all_results.items():
         for r in records:
-            pid = r["problem_id"]
-            by_problem.setdefault(pid, []).append(r)
+            pid, metrics = next(iter(r.items()))
+            by_problem.setdefault(pid, []).append((pid, metrics))
 
     oracle_best, oracle_worst = [], []
-    for pid, records in by_problem.items():
-        best = min(records, key=lambda r: r["gap"])
-        worst = max(records, key=lambda r: r["gap"])
+    for pid, entries in by_problem.items():
+        best_pid, best_m = min(entries, key=lambda e: e[1]["final_fitness"])
+        worst_pid, worst_m = max(entries, key=lambda e: e[1]["final_fitness"])
         oracle_best.append(
             {
-                "problem_id": pid,
-                "agent": "oracle-best",
-                "best_agent": best["agent"],
-                "best_y": best["best_y"],
-                "gap": best["gap"],
+                pid: {
+                    "area_under_optimization_curve": best_m[
+                        "area_under_optimization_curve"
+                    ],
+                    "aocc": best_m["aocc"],
+                    "final_fitness": best_m["final_fitness"],
+                    "agent": "oracle-best",
+                    "best_agent": best_m["agent"],
+                }
             }
         )
         oracle_worst.append(
             {
-                "problem_id": pid,
-                "agent": "oracle-worst",
-                "worst_agent": worst["agent"],
-                "best_y": worst["best_y"],
-                "gap": worst["gap"],
+                pid: {
+                    "area_under_optimization_curve": worst_m[
+                        "area_under_optimization_curve"
+                    ],
+                    "aocc": worst_m["aocc"],
+                    "final_fitness": worst_m["final_fitness"],
+                    "agent": "oracle-worst",
+                    "worst_agent": worst_m["agent"],
+                }
             }
         )
 
-    oracle_best.sort(key=lambda r: r["problem_id"])
-    oracle_worst.sort(key=lambda r: r["problem_id"])
+    oracle_best.sort(key=lambda r: next(iter(r)))
+    oracle_worst.sort(key=lambda r: next(iter(r)))
     return oracle_best, oracle_worst
 
 
@@ -233,14 +242,20 @@ def compute_oracle(all_results: dict[str, list[dict]]) -> tuple[list[dict], list
 
 
 def summarise(tag: str, records: list[dict]) -> dict:
-    gaps = [r["gap"] for r in records]
+    fitnesses = [next(iter(r.values()))["final_fitness"] for r in records]
+    aocc_vals = [next(iter(r.values()))["aocc"] for r in records]
+    auoc_vals = [
+        next(iter(r.values()))["area_under_optimization_curve"] for r in records
+    ]
     return {
         "agent": tag,
-        "n_problems": len(gaps),
-        "mean_gap": float(np.mean(gaps)),
-        "median_gap": float(np.median(gaps)),
-        "best_gap": float(np.min(gaps)),
-        "worst_gap": float(np.max(gaps)),
+        "n_problems": len(fitnesses),
+        "mean_final_fitness": float(np.mean(fitnesses)),
+        "median_final_fitness": float(np.median(fitnesses)),
+        "best_final_fitness": float(np.min(fitnesses)),
+        "worst_final_fitness": float(np.max(fitnesses)),
+        "mean_aocc": float(np.mean(aocc_vals)),
+        "mean_auoc": float(np.mean(auoc_vals)),
     }
 
 
@@ -252,17 +267,15 @@ def save_results(records: list[dict], path: str) -> None:
 
 def print_summary(summaries: list[dict]) -> None:
     width = max(len(s["agent"]) for s in summaries) + 2
-    header = (
-        f"  {'Agent':<{width}}  {'Mean gap':>12}  {'Median gap':>12}  {'Best gap':>12}"
-    )
+    header = f"  {'Agent':<{width}}  {'Mean fitness':>14}  {'Median fitness':>14}  {'Mean AUOC':>14}"
     print(header)
     print("  " + "-" * (len(header) - 2))
     for s in summaries:
         print(
             f"  {s['agent']:<{width}}  "
-            f"{s['mean_gap']:>12.4e}  "
-            f"{s['median_gap']:>12.4e}  "
-            f"{s['best_gap']:>12.4e}"
+            f"{s['mean_final_fitness']:>14.4e}  "
+            f"{s['median_final_fitness']:>14.4e}  "
+            f"{s['mean_auoc']:>14.4e}"
         )
 
 
