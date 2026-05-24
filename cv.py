@@ -195,6 +195,13 @@ def _parse_args() -> argparse.Namespace:
         "--ppo-epochs", type=int, default=6, help="PPO gradient epochs per update"
     )
     exp.add_argument("--device", default="cpu", help="PyTorch device")
+    exp.add_argument(
+        "-j",
+        "--n-jobs",
+        type=int,
+        default=1,
+        help="Number of folds to run in parallel (default: 1 = sequential)",
+    )
 
     return root.parse_args()
 

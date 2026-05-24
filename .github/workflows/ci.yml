@@ -34,6 +34,9 @@ jobs:
       - name: Ruff lint
         run: uv run ruff format .
 
+      - name: Ruff check
+        run: uv run ruff check
+
       - name: Run pytest
         run: uv run pytest tests/ -v --tb=short
 

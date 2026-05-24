@@ -20,6 +20,7 @@ import torch
 
 from agents.exponential_das.agent import ExpDASAgent
 from das.env.das_env import DASEnv
+from das.training.common import compute_run_stats
 
 
 def train(
@@ -111,7 +112,9 @@ def train(
 
         if ep % eval_interval == 0:
             test_results = evaluate(test_env, agent, n_episodes=20)
-            mean_test_r = float(np.mean([r["reward"] for r in test_results]))
+            mean_test_r = float(
+                np.mean([next(iter(r.values()))["reward"] for r in test_results])
+            )
             entry["mean_test_reward"] = mean_test_r
             mean_train_r = float(np.mean(episode_rewards[-eval_interval:]))
             print(
@@ -145,24 +148,36 @@ def evaluate(
     env: DASEnv,
     agent: ExpDASAgent,
     n_episodes: int = 20,
+    global_optima: dict[str, float] | None = None,
 ) -> list[dict]:
     """Run the agent deterministically and return per-episode results."""
+    if global_optima is None:
+        global_optima = {}
     results = []
     for _ in range(n_episodes):
         obs, info = env.reset()
+        problem_id = info.get("problem_id", "")
         done = False
         total_reward = 0.0
+        fitness_history: list[tuple[int, float]] = []
+        step_info: dict = {}
+
         while not done:
             action = agent.predict(obs)
             obs, reward, terminated, truncated, step_info = env.step(action)
             done = terminated or truncated
             total_reward += reward
+            fitness_history.extend(step_info.get("fitness_history_step", []))
+
+        max_fe = step_info.get("n_fe", 0)
+        global_minimum = global_optima.get(problem_id, 0.0)
+        stats = compute_run_stats(fitness_history, max_fe, global_minimum)
         results.append(
             {
-                "problem_id": info.get("problem_id", ""),
-                "reward": total_reward,
-                "best_y": step_info.get("best_y", float("inf")),
-                "n_fe": step_info.get("n_fe", 0),
+                problem_id: {
+                    **stats,
+                    "reward": total_reward,
+                }
             }
         )
     return results

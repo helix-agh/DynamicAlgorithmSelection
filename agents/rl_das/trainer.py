@@ -112,7 +112,7 @@ def train(
             ep = _run_episode(train_env, agent, deterministic=False)
             epoch_rewards.append(ep["total_reward"])
 
-            diagnostics = agent.learn(k_epoch)
+            agent.learn(k_epoch)
             agent.rollout.clear()
 
         mean_train_reward = float(np.mean(epoch_rewards))

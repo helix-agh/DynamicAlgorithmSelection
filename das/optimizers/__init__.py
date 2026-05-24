@@ -1,1 +1,4 @@
-from das.optimizers.portfolio import PORTFOLIO, get_portfolio
+from das.optimizers.portfolio import (
+    PORTFOLIO as PORTFOLIO,
+    get_portfolio as get_portfolio,
+)

@@ -72,7 +72,7 @@ class NM(SubOptimizer):
 
     def iterate(self, x, y):
         order = np.argsort(y)
-        l, h = order[0], order[-1]
+        lo, h = order[0], order[-1]
         p_mean = np.mean(x[order[:-1]], axis=0)
 
         # Reflection
@@ -85,7 +85,7 @@ class NM(SubOptimizer):
         if self._check_terminations():
             return x, y
 
-        if y_r < y[l]:
+        if y_r < y[lo]:
             # Expansion
             p_e = np.clip(
                 self.gamma * p_r + (1 - self.gamma) * p_mean,
@@ -113,7 +113,7 @@ class NM(SubOptimizer):
                     # Shrinkage
                     for i in range(1, self.n_individuals):
                         x[order[i]] = np.clip(
-                            x[l] + self.shrinkage * (x[order[i]] - x[l]),
+                            x[lo] + self.shrinkage * (x[order[i]] - x[lo]),
                             self.lower_boundary,
                             self.upper_boundary,
                         )
