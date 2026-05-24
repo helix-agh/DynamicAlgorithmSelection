@@ -210,6 +210,7 @@ def compute_oracle(all_results: dict[str, list[dict]]) -> tuple[list[dict], list
                     "area_under_optimization_curve": best_m[
                         "area_under_optimization_curve"
                     ],
+                    "aocc": best_m["aocc"],
                     "final_fitness": best_m["final_fitness"],
                     "agent": "oracle-best",
                     "best_agent": best_m["agent"],
@@ -222,6 +223,7 @@ def compute_oracle(all_results: dict[str, list[dict]]) -> tuple[list[dict], list
                     "area_under_optimization_curve": worst_m[
                         "area_under_optimization_curve"
                     ],
+                    "aocc": worst_m["aocc"],
                     "final_fitness": worst_m["final_fitness"],
                     "agent": "oracle-worst",
                     "worst_agent": worst_m["agent"],
