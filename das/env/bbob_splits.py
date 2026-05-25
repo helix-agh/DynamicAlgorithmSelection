@@ -7,7 +7,7 @@ import numpy as np
 ALL_DIMS = [2, 3, 5, 10, 20, 40]
 ALL_FUNCTIONS = set(range(1, 25))
 INSTANCE_IDS = [1, 2, 3, 4, 5, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80]
-EASY_TRAIN_FUNCTIONS = {1, 2, 3, 4, *range(6, 15), 18, 19, 20, 22, 23, 24} # Czy tutaj nie powinny być też funkcje 1,2,3?
+EASY_TRAIN_FUNCTIONS = {4, *range(6, 15), 18, 19, 20, 22, 23, 24}
 
 
 def build_problem_ids(
@@ -22,7 +22,7 @@ def build_problem_ids(
     ]
 
 
-def get_train_test_split(mode: str, dims: list[int], seed: int = 0) -> tuple[list[str], list[str]]:
+def get_train_test_split(mode: str, dims: list[int]) -> tuple[list[str], list[str]]:
     """Return (train_ids, test_ids) for the given split mode and dimensions.
 
     Modes:
@@ -42,7 +42,7 @@ def get_train_test_split(mode: str, dims: list[int], seed: int = 0) -> tuple[lis
         )
     # random 2/3 – 1/3 split
     all_ids = build_problem_ids(ALL_FUNCTIONS, dims)
-    rng = np.random.default_rng(seed)
+    rng = np.random.default_rng()
     rng.shuffle(all_ids)
     split = 2 * len(all_ids) // 3
     return all_ids[:split], all_ids[split:]

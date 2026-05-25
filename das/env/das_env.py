@@ -16,20 +16,9 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 
-from das.env.observation import (
-    compute_observation,
-    observation_dim,
-    compute_ela_features,
-    MAX_HISTORY_SAMPLE,
-    ELA_DIM,
-)
+from das.env.observation import (compute_observation, observation_dim, MAX_HISTORY_SAMPLE)
 from das.env.reward import compute_reward
 from das.optimizers.base import get_checkpoints
-
-# Recompute ELA every ~500 new population samples.  pflacco runs regression,
-# nearest-neighbour search, and IC calculations on every call — running it
-# every step would dominate wall-clock time for long training runs.
-_ELA_RECOMPUTE_THRESHOLD = MAX_HISTORY_SAMPLE // 5
 
 
 class DASEnv(gym.Env):
@@ -121,11 +110,6 @@ class DASEnv(gym.Env):
         self._stagnation_count = 0
         self._choices_history: list[int] = []
 
-        # ELA features are expensive; cache the last computed vector and refresh
-        # lazily once _ELA_RECOMPUTE_THRESHOLD new samples have arrived.
-        self._ela_cache: np.ndarray = np.zeros(ELA_DIM, dtype=np.float32)
-        self._ela_cache_len: int = 0
-
     # ------------------------------------------------------------------ #
     # Gymnasium interface                                                  #
     # ------------------------------------------------------------------ #
@@ -156,8 +140,6 @@ class DASEnv(gym.Env):
         self._initial_range = (float("inf"), -np.inf)
         self._stagnation_count = 0
         self._choices_history = []
-        self._ela_cache = np.zeros(ELA_DIM, dtype=np.float32)
-        self._ela_cache_len = 0
 
         obs = self._build_observation()
         info = {"problem_id": problem_id, "dimension": dim}
@@ -312,13 +294,6 @@ class DASEnv(gym.Env):
             )
 
     def _build_observation(self) -> np.ndarray:
-        # Recompute ELA only when enough new samples have arrived.
-        # _ela_cache starts as zeros (correct before 50 samples) and is reset
-        # each episode, so stale features from a previous episode never leak in.
-        current_len = len(self._x_history) if self._x_history is not None else 0
-        if current_len >= 50 and current_len - self._ela_cache_len >= _ELA_RECOMPUTE_THRESHOLD:
-            self._ela_cache = compute_ela_features(self._x_history, self._y_history)
-            self._ela_cache_len = current_len
 
         return compute_observation(
             x_history=self._x_history,
@@ -330,5 +305,4 @@ class DASEnv(gym.Env):
             max_fe=max(self._max_fe, 1),
             stagnation_count=self._stagnation_count,
             ndim_problem=self._problem.dimension if self._problem is not None else 1,
-            ela=self._ela_cache,
         )

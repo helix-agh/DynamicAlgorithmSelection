@@ -58,12 +58,10 @@ def compute_ela_features(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
 
-        # Slice to the most-recent samples first; deduplication is done below
-        # in normalised space where it is actually meaningful — raw-space
-        # np.unique missed points that become identical after normalisation and
-        # was therefore doing redundant work without full correctness guarantees.
-        x = x[-MAX_HISTORY_SAMPLE:]
-        y = y[-MAX_HISTORY_SAMPLE:]
+        _, unique_idx = np.unique(x, axis=0, return_index=True)
+        unique_idx = np.sort(unique_idx)
+        x = x[unique_idx][-MAX_HISTORY_SAMPLE:]
+        y = y[unique_idx][-MAX_HISTORY_SAMPLE:]
 
         x_norm_arr = (x - x.mean()) / (x.std() + 1e-8)
         y_norm_arr = (y - y.mean()) / (y.std() + 1e-8)
@@ -98,14 +96,8 @@ def compute_ela_features(x: np.ndarray, y: np.ndarray) -> np.ndarray:
                 )
             }
 
-        # pflacco may return an incomplete dict for degenerate or edge-case
-        # inputs that slipped past the variance guard above.  Fall back to
-        # zeros rather than crashing training with a KeyError mid-run.
-        try:
-            all_feats = {**meta, **nbc, **disp, **ic, **ela_distr}
-            return np.array([all_feats[k] for k in ELA_FEATURE_KEYS], dtype=np.float32)
-        except (KeyError, ValueError):
-            return np.zeros(ELA_DIM, dtype=np.float32)
+        all_feats = {**meta, **nbc, **disp, **ic, **ela_distr}
+        return np.array([all_feats[k] for k in ELA_FEATURE_KEYS], dtype=np.float32)
 
 
 def compute_action_history_features(
@@ -172,16 +164,12 @@ def compute_observation(
     max_fe: int,
     stagnation_count: int,
     ndim_problem: int,
-    ela: np.ndarray | None = None,
 ) -> np.ndarray:
     """Assemble the full observation vector from its components."""
-    # Accept a pre-computed ELA vector so the caller can cache it across steps
-    # and avoid running pflacco on every observation build (pflacco is expensive).
-    if ela is None:
-        if x_history is not None and y_history is not None and len(x_history) >= 50:
-            ela = compute_ela_features(x_history, y_history)
-        else:
-            ela = np.zeros(ELA_DIM, dtype=np.float32)
+    if x_history is not None and y_history is not None and len(x_history) >= 50:
+        ela = compute_ela_features(x_history, y_history)
+    else:
+        ela = np.zeros(ELA_DIM, dtype=np.float32)
 
     action_hist = compute_action_history_features(
         choices_history, n_actions, n_checkpoints, ndim_problem
