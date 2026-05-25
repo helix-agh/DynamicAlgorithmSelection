@@ -29,7 +29,7 @@ class DASEnv(gym.Env):
     problem_ids:
         BBOB problem IDs to cycle through (one per episode).
     suite:
-        cocoex Suite object to fetch problems from.
+        IOHSuite (or compatible) object to fetch problems from.
     optimizers:
         Ordered list of sub-optimizer classes (defines the action space).
     fe_multiplier:

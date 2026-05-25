@@ -4,7 +4,6 @@ import json
 import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-import cocoex as cx
 import numpy as np
 
 from das.env.bbob_splits import get_cv_folds, get_train_test_split
@@ -30,7 +29,9 @@ def run_exp_das(args) -> None:
         f"  n_epochs={args.n_epochs}  total_episodes={total_episodes}"
     )
 
-    suite = cx.Suite("bbob", "", "")
+    from das.env.ioh_suite import IOHSuite
+
+    suite = IOHSuite()
 
     env_cfg = dict(
         suite=suite,
@@ -98,13 +99,13 @@ def _run_single_fold(
 ) -> tuple[int, str, list[dict]]:
     """Train and evaluate one CV fold.  Safe to call in a subprocess.
 
-    Each call creates its own cocoex Suite so the (non-picklable) Suite object
-    never crosses process boundaries.
+    Each call creates its own IOHSuite so no shared mutable state crosses
+    process boundaries.
 
     Returns (fold_idx, fold_tag, fold_results).
     """
     # Lazy imports so the function can be pickled by ProcessPoolExecutor.
-    import cocoex as _cx
+    from das.env.ioh_suite import IOHSuite as _IOHSuite
     from agents.exponential_das import ExpDASAgent
     from agents.exponential_das import train as _train, evaluate as _evaluate
 
@@ -121,7 +122,7 @@ def _run_single_fold(
     obs_dim = observation_dim(n_opt)
     buffer_capacity = args.buffer_capacity or (16 * args.n_checkpoints)
 
-    suite = _cx.Suite("bbob", "", "")
+    suite = _IOHSuite()
     env_cfg = dict(
         suite=suite,
         optimizers=optimizers,

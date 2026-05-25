@@ -166,7 +166,7 @@ def _pop_features(
 
 
 class RLDASEnv(gym.Env):
-    """RL-DAS environment wrapping BBOB problems via a cocoex Suite.
+    """RL-DAS environment wrapping optimization problems via an IOHSuite.
 
     Uses a Population object as shared warm-started state across all DE
     sub-optimizers (matching the original RL-DAS design).
@@ -176,7 +176,7 @@ class RLDASEnv(gym.Env):
     problem_ids:
         BBOB problem IDs to cycle through (one per episode).
     suite:
-        cocoex Suite object.
+        IOHSuite object.
     optimizers:
         List of instantiated DE optimizer objects (NL_SHADE_RSP, JDE21, MadDE).
     dim:
