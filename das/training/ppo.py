@@ -138,7 +138,6 @@ def run_ppo(args) -> None:
         "reward_option": args.reward_option,
         "n_individuals": args.n_individuals,
         "seed": args.seed,
-        "ela_recompute_every": args.ela_recompute_every,
     }
 
     print(f"Portfolio : {args.portfolio}")

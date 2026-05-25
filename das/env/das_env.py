@@ -26,6 +26,10 @@ from das.env.observation import (
 from das.env.reward import compute_reward
 from das.optimizers.base import get_checkpoints
 
+# Recompute ELA every ~500 new population samples.  pflacco runs regression,
+# nearest-neighbour search, and IC calculations on every call — running it
+# every step would dominate wall-clock time for long training runs.
+_ELA_RECOMPUTE_THRESHOLD = MAX_HISTORY_SAMPLE // 5
 
 
 class DASEnv(gym.Env):
@@ -67,7 +71,6 @@ class DASEnv(gym.Env):
         reward_option: int = 1,
         n_individuals: int | list[int | None] | None = None,
         seed: int | None = None,
-        ela_recompute_every: int = MAX_HISTORY_SAMPLE // 5 # ~500,
     ):
         super().__init__()
         self.problem_ids = problem_ids
@@ -90,7 +93,6 @@ class DASEnv(gym.Env):
                 )
             self.n_individuals = pop
         self._seed = seed
-        self._ela_recompute_every = max(1, ela_recompute_every)
 
         n_actions = len(optimizers)
         obs_dim = observation_dim(n_actions)
@@ -314,10 +316,7 @@ class DASEnv(gym.Env):
         # _ela_cache starts as zeros (correct before 50 samples) and is reset
         # each episode, so stale features from a previous episode never leak in.
         current_len = len(self._x_history) if self._x_history is not None else 0
-        if current_len >= 50 and (
-            self._ela_cache_len == 0
-            or current_len - self._ela_cache_len >= self._ela_recompute_every
-        ):
+        if current_len >= 50 and current_len - self._ela_cache_len >= _ELA_RECOMPUTE_THRESHOLD:
             self._ela_cache = compute_ela_features(self._x_history, self._y_history)
             self._ela_cache_len = current_len
 
