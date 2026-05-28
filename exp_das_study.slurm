@@ -31,25 +31,25 @@ echo "Array job $SLURM_ARRAY_TASK_ID | SEED=$SEED | PORTFOLIO=${PORTFOLIO[*]}"
 if [[ $SLURM_ARRAY_TASK_ID -eq 0 ]]; then
     echo "Exp-DAS | CV-LOIO | multi-dim (2 5 10)"
     python cv.py exp-das ${PORTFOLIO_STR}_EXPDAS_LOIO_MULTI_SEED${SEED} \
-        -p "${PORTFOLIO[@]}" --dims 2 5 10 --cv-mode LOIO --n-epochs 10 --seed $SEED --n-jobs 3
+        -p "${PORTFOLIO[@]}" --dims 2 5 10 --cv-mode LOIO --n-epochs 3 --seed $SEED --n-jobs 3
 
 # 1: CV-LOPO multi-dim (2,5,10)
 elif [[ $SLURM_ARRAY_TASK_ID -eq 1 ]]; then
     echo "Exp-DAS | CV-LOPO | multi-dim (2 5 10)"
     python cv.py exp-das ${PORTFOLIO_STR}_EXPDAS_LOPO_MULTI_SEED${SEED} \
-        -p "${PORTFOLIO[@]}" --dims 2 5 10 --cv-mode LOPO --n-epochs 10 --seed $SEED --n-jobs 3
+        -p "${PORTFOLIO[@]}" --dims 2 5 10 --cv-mode LOPO --n-epochs 3 --seed $SEED --n-jobs 3
 
 # 2: CV-LOIO multi-dim (2,3,5,10)
 elif [[ $SLURM_ARRAY_TASK_ID -eq 2 ]]; then
     echo "Exp-DAS | CV-LOIO | multi-dim (2 3 5 10)"
     python cv.py exp-das ${PORTFOLIO_STR}_EXPDAS_LOIO_ALLDIM_SEED${SEED} \
-        -p "${PORTFOLIO[@]}" --dims 2 3 5 10 --cv-mode LOIO --n-epochs 10 --seed $SEED --n-jobs 3
+        -p "${PORTFOLIO[@]}" --dims 2 3 5 10 --cv-mode LOIO --n-epochs 3 --seed $SEED --n-jobs 3
 
 # 3: CV-LOPO multi-dim (2,3,5,10)
 elif [[ $SLURM_ARRAY_TASK_ID -eq 3 ]]; then
     echo "Exp-DAS | CV-LOPO | multi-dim (2 3 5 10)"
     python cv.py exp-das ${PORTFOLIO_STR}_EXPDAS_LOPO_ALLDIM_SEED${SEED} \
-        -p "${PORTFOLIO[@]}" --dims 2 3 5 10 --cv-mode LOPO --n-epochs 10 --seed $SEED --n-jobs 3
+        -p "${PORTFOLIO[@]}" --dims 2 3 5 10 --cv-mode LOPO --n-epochs 3 --seed $SEED --n-jobs 3
 
 # 4-11: single-dimension runs; task ID encodes (dim_idx * 2 + cv_mode)
 # dim_idx: 0→2, 1→3, 2→5, 3→10  |  cv_mode: 0→LOIO, 1→LOPO
@@ -62,5 +62,5 @@ else
     CV_MODE=${CV_MODES[$CV_IDX]}
     echo "Exp-DAS | CV-${CV_MODE} | dim=${DIM}"
     python cv.py exp-das "${PORTFOLIO_STR}_EXPDAS_${CV_MODE}_${DIM}D_SEED${SEED}" \
-        -p "${PORTFOLIO[@]}" --dims "${DIM}" --cv-mode "${CV_MODE}" --n-epochs 10 --seed "$SEED" --n-jobs 3
+        -p "${PORTFOLIO[@]}" --dims "${DIM}" --cv-mode "${CV_MODE}" --n-epochs 3 --seed "$SEED" --n-jobs 3
 fi
