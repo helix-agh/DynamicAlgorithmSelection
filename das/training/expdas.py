@@ -10,7 +10,7 @@ from das.env.bbob_splits import get_cv_folds, get_train_test_split
 from das.env.das_env import DASEnv
 from das.env.observation import observation_dim
 from das.optimizers.portfolio import get_portfolio
-from das.training.common import load_global_optima, write_jsonl
+from das.training.common import write_jsonl
 
 
 def run_exp_das(args) -> None:
@@ -78,12 +78,10 @@ def run_exp_das(args) -> None:
 
     if args.eval:
         print("\nFinal evaluation on test set …")
-        global_optima = load_global_optima()
         test_results = evaluate(
             test_env,
             agent,
             n_episodes=min(len(test_ids), 50),
-            global_optima=global_optima,
         )
         mean_final_fitness = float(
             np.mean([next(iter(r.values()))["final_fitness"] for r in test_results])
@@ -168,11 +166,8 @@ def _run_single_fold(
         with open(result_path) as fh:
             fold_results = [json.loads(line) for line in fh]
     else:
-        global_optima = load_global_optima()
         eval_env = DASEnv(problem_ids=test_ids, **env_cfg)
-        raw = _evaluate(
-            eval_env, agent, n_episodes=len(test_ids), global_optima=global_optima
-        )
+        raw = _evaluate(eval_env, agent, n_episodes=len(test_ids))
         fold_results = [
             {pid: {**m, "fold": fold_tag}} for r in raw for pid, m in r.items()
         ]

@@ -328,7 +328,6 @@ class TestCollectEnvResults:
             suite,
             get_portfolio(PORTFOLIO),
             make_cfg(),
-            {},
         )
         assert len(records) == 2
 
@@ -341,7 +340,6 @@ class TestCollectEnvResults:
             suite,
             get_portfolio(PORTFOLIO),
             make_cfg(),
-            {},
         )
         r = records[0]
         assert len(r) == 1
@@ -358,7 +356,6 @@ class TestCollectEnvResults:
             suite,
             get_portfolio(PORTFOLIO),
             make_cfg(),
-            {},
         )
         metrics = _metrics(records[0])
         assert METRICS_KEYS <= set(metrics.keys())
@@ -372,7 +369,6 @@ class TestCollectEnvResults:
             suite,
             get_portfolio(PORTFOLIO),
             make_cfg(),
-            {},
         )
         for r in records:
             assert 0.0 <= _metrics(r)["aocc"] <= 1.0
@@ -386,7 +382,6 @@ class TestCollectEnvResults:
             suite,
             get_portfolio(PORTFOLIO),
             make_cfg(),
-            {},
         )
         for r in records:
             assert np.isfinite(_metrics(r)["final_fitness"])
@@ -409,7 +404,6 @@ class TestCollectEnvResults:
             suite,
             get_portfolio(PORTFOLIO),
             make_cfg(),
-            {},
         )
         assert _metrics(records[0])["agent"] == "fixed:SPSO"
 
@@ -423,7 +417,6 @@ class TestCollectEnvResults:
             suite,
             get_portfolio(PORTFOLIO),
             make_cfg(),
-            {},
         )
         assert [_pid(r) for r in records] == ids
 
@@ -482,7 +475,6 @@ class TestSingleAlgorithm:
             suite,
             FE_MULTIPLIER,
             N_INDIVIDUALS,
-            {},
         )
         assert len(records) == 2
 
@@ -496,7 +488,6 @@ class TestSingleAlgorithm:
             suite,
             FE_MULTIPLIER,
             N_INDIVIDUALS,
-            {},
         )
         r = records[0]
         metrics = _metrics(r)
@@ -513,7 +504,6 @@ class TestSingleAlgorithm:
             suite,
             FE_MULTIPLIER,
             N_INDIVIDUALS,
-            {},
         )
         for r in records:
             assert 0.0 <= _metrics(r)["aocc"] <= 1.0
@@ -529,7 +519,6 @@ class TestSingleAlgorithm:
             suite,
             FE_MULTIPLIER,
             N_INDIVIDUALS,
-            {},
         )
         fixed_records = collect_env_results(
             "fixed:SPSO",
@@ -538,7 +527,6 @@ class TestSingleAlgorithm:
             suite,
             get_portfolio(PORTFOLIO),
             make_cfg(),
-            {},
         )
         for r in single_records + fixed_records:
             assert np.isfinite(_metrics(r)["final_fitness"])
@@ -636,10 +624,10 @@ class TestComputeOracle:
         optimizers = get_portfolio(PORTFOLIO)
 
         records_spso = collect_env_results(
-            "fixed:SPSO", fixed_policy(0), ids, suite, optimizers, cfg, {}
+            "fixed:SPSO", fixed_policy(0), ids, suite, optimizers, cfg
         )
         records_ipso = collect_env_results(
-            "fixed:IPSO", fixed_policy(1), ids, suite, optimizers, cfg, {}
+            "fixed:IPSO", fixed_policy(1), ids, suite, optimizers, cfg
         )
 
         best, worst = compute_oracle(

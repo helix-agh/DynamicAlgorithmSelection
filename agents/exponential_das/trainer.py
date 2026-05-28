@@ -20,7 +20,7 @@ import torch
 
 from agents.exponential_das.agent import ExpDASAgent
 from das.env.das_env import DASEnv
-from das.training.common import compute_run_stats
+from das.training.common import compute_run_stats, get_ioh_optimum
 
 
 def train(
@@ -148,11 +148,8 @@ def evaluate(
     env: DASEnv,
     agent: ExpDASAgent,
     n_episodes: int = 20,
-    global_optima: dict[str, float] | None = None,
 ) -> list[dict]:
     """Run the agent deterministically and return per-episode results."""
-    if global_optima is None:
-        global_optima = {}
     results = []
     for _ in range(n_episodes):
         obs, info = env.reset()
@@ -170,7 +167,7 @@ def evaluate(
             fitness_history.extend(step_info.get("fitness_history_step", []))
 
         max_fe = step_info.get("n_fe", 0)
-        global_minimum = global_optima.get(problem_id, 0.0)
+        global_minimum = get_ioh_optimum(problem_id)
         stats = compute_run_stats(fitness_history, max_fe, global_minimum)
         results.append(
             {

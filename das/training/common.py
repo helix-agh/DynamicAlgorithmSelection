@@ -1,18 +1,26 @@
 """Shared training utilities."""
 
 import json
-import os
+import re
 
 import numpy as np
 
 from das.env.das_env import DASEnv
 
+_BBOB_ID_RE = re.compile(r"^bbob_f(\d+)_i(\d+)_d(\d+)$")
 
-def load_global_optima(path: str = "bbob_optima.jsonl") -> dict[str, float]:
-    if not os.path.exists(path):
-        return {}
-    with open(path) as f:
-        return {k: v for line in f for k, v in json.loads(line).items()}
+
+def get_ioh_optimum(problem_id: str) -> float:
+    """Return the global minimum for a BBOB problem via the IOH API."""
+    m = _BBOB_ID_RE.match(problem_id)
+    if m is None:
+        return 0.0
+    import ioh
+
+    fid, iid, dim = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    return float(
+        ioh.get_problem(fid, iid, dim, problem_class=ioh.ProblemClass.BBOB).optimum.y
+    )
 
 
 # Standard BBOB precision targets (excess above the global optimum).

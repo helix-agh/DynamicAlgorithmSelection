@@ -22,7 +22,7 @@ from tqdm import tqdm
 from das.env.bbob_splits import ALL_DIMS, get_train_test_split
 from das.optimizers.portfolio import get_portfolio
 from das.utils import set_seed
-from das.training.common import compute_run_stats, load_global_optima, make_das_env
+from das.training.common import compute_run_stats, get_ioh_optimum, make_das_env
 
 warnings.filterwarnings("ignore")
 
@@ -44,7 +44,7 @@ def parse_args():
     p.add_argument("-s", "--n-checkpoints", type=int, default=10)
     p.add_argument("-x", "--cdb", type=float, default=1.0)
     p.add_argument("-O", "--reward-option", type=int, default=1, choices=[1, 2, 3, 4])
-    p.add_argument("-n", "--n-individuals", type=int, default=100)
+    p.add_argument("-n", "--n-individuals", type=int, default=None)
     p.add_argument("--coco", action="store_true", help="Write COCO observer data")
     p.add_argument("--seed", type=int, default=42)
     return p.parse_args()
@@ -84,8 +84,6 @@ def main():
         eval_env.training = False
         eval_env.norm_reward = False
 
-    global_optima = load_global_optima()
-
     out_path = os.path.join("results", f"{args.name}_eval.jsonl")
     results_all = []
 
@@ -101,7 +99,7 @@ def main():
             fitness_history.extend(step_info.get("fitness_history_step", []))
 
         max_fe = step_info.get("n_fe", 0)
-        global_minimum = global_optima.get(problem_id, 0.0)
+        global_minimum = get_ioh_optimum(problem_id)
         stats = compute_run_stats(fitness_history, max_fe, global_minimum)
         results_all.append({problem_id: stats})
 

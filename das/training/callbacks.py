@@ -96,8 +96,6 @@ class DASEvalCallback(BaseCallback):
         Number of problems to evaluate (taken from the start of the problem list).
     name:
         Prefix for result files written to results/.
-    global_optima:
-        Mapping from problem_id to its global minimum (for AOCC computation).
     """
 
     def __init__(
@@ -106,7 +104,6 @@ class DASEvalCallback(BaseCallback):
         eval_freq: int = 10_000,
         n_eval_episodes: int = 20,
         name: str = "eval",
-        global_optima: dict[str, float] | None = None,
         verbose: int = 1,
     ):
         super().__init__(verbose)
@@ -114,7 +111,6 @@ class DASEvalCallback(BaseCallback):
         self.eval_freq = eval_freq
         self.n_eval_episodes = n_eval_episodes
         self.name = name
-        self.global_optima = global_optima or {}
         self._best_mean_aocc = -np.inf
 
     def _on_step(self) -> bool:

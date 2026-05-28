@@ -46,7 +46,7 @@ from das.utils import set_seed
 from das.env.bbob_splits import ALL_DIMS, get_train_test_split
 from das.training.common import (
     compute_run_stats,
-    load_global_optima,
+    get_ioh_optimum,
     ERT_TARGETS,
     _ert_key,
 )
@@ -100,7 +100,6 @@ def collect_env_results(
     suite,
     optimizers: list,
     cfg: dict,
-    global_optima: dict[str, float],
 ) -> list[dict]:
     """Run policy_fn on every problem in test_ids via DASEnv."""
     env = DASEnv(
@@ -117,7 +116,7 @@ def collect_env_results(
     for problem_id in tqdm(test_ids, desc=f"  {agent_tag}", smoothing=0.0):
         step_info, fitness_history = run_episode(env, policy_fn)
         max_fe = step_info.get("n_fe", 0)
-        global_minimum = global_optima.get(problem_id, 0.0)
+        global_minimum = get_ioh_optimum(problem_id)
         stats = compute_run_stats(fitness_history, max_fe, global_minimum)
         results.append({problem_id: {**stats, "agent": agent_tag}})
     env.close()
@@ -169,13 +168,12 @@ def collect_single_results(
     suite,
     fe_multiplier: int,
     n_individuals: int,
-    global_optima: dict[str, float],
 ) -> list[dict]:
     """Run the optimizer independently on every problem in test_ids."""
     results = []
     for problem_id in tqdm(test_ids, desc=f"  {agent_tag}", smoothing=0.0):
         problem = suite.get_problem(problem_id)
-        global_minimum = global_optima.get(problem_id, 0.0)
+        global_minimum = get_ioh_optimum(problem_id)
         stats = run_single_algorithm(
             optimizer_class, problem, fe_multiplier, n_individuals, global_minimum
         )
@@ -351,7 +349,7 @@ def parse_args():
     p.add_argument("-s", "--n-checkpoints", type=int, default=10)
     p.add_argument("-x", "--cdb", type=float, default=1.0)
     p.add_argument("-O", "--reward-option", type=int, default=1, choices=[1, 2, 3, 4])
-    p.add_argument("-n", "--n-individuals", type=int, default=100)
+    p.add_argument("-n", "--n-individuals", type=int, default=None)
     p.add_argument("--seed", type=int, default=42)
     return p.parse_args()
 
@@ -370,8 +368,6 @@ def main():
     opt_names = args.portfolio
     suite = IOHSuite()
     _, test_ids = get_train_test_split(args.mode, args.dims)
-    global_optima = load_global_optima()
-
     cfg = {
         "fe_multiplier": args.fe_multiplier,
         "n_checkpoints": args.n_checkpoints,
@@ -417,7 +413,7 @@ def main():
 
         if tag == "random":
             records = collect_env_results(
-                tag, random_policy, test_ids, suite, optimizers, cfg, global_optima
+                tag, random_policy, test_ids, suite, optimizers, cfg
             )
 
         elif tag.startswith("fixed:"):
@@ -435,7 +431,6 @@ def main():
                 suite,
                 optimizers,
                 cfg,
-                global_optima,
             )
 
         elif tag.startswith("single:"):
@@ -448,7 +443,6 @@ def main():
                 suite,
                 args.fe_multiplier,
                 args.n_individuals,
-                global_optima,
             )
 
         else:

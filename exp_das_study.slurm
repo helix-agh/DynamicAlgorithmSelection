@@ -8,7 +8,7 @@
 #SBATCH --time=48:00:00
 #SBATCH --partition=plgrid-gpu-a100
 #SBATCH -A plgrldas2026-gpu-a100
-#SBATCH --array=0-3
+#SBATCH --array=0-11
 
 # Args: SEED [PORTFOLIO...]
 SEED=${1:-42}
@@ -50,4 +50,17 @@ elif [[ $SLURM_ARRAY_TASK_ID -eq 3 ]]; then
     echo "Exp-DAS | CV-LOPO | multi-dim (2 3 5 10)"
     python cv.py exp-das ${PORTFOLIO_STR}_EXPDAS_LOPO_ALLDIM_SEED${SEED} \
         -p "${PORTFOLIO[@]}" --dims 2 3 5 10 --cv-mode LOPO --n-epochs 10 --seed $SEED
+
+# 4-11: single-dimension runs; task ID encodes (dim_idx * 2 + cv_mode)
+# dim_idx: 0→2, 1→3, 2→5, 3→10  |  cv_mode: 0→LOIO, 1→LOPO
+else
+    DIMS=(2 3 5 10)
+    DIM_IDX=$(( (SLURM_ARRAY_TASK_ID - 4) / 2 ))
+    CV_IDX=$(( (SLURM_ARRAY_TASK_ID - 4) % 2 ))
+    DIM=${DIMS[$DIM_IDX]}
+    CV_MODES=('LOIO' 'LOPO')
+    CV_MODE=${CV_MODES[$CV_IDX]}
+    echo "Exp-DAS | CV-${CV_MODE} | dim=${DIM}"
+    python cv.py exp-das "${PORTFOLIO_STR}_EXPDAS_${CV_MODE}_${DIM}D_SEED${SEED}" \
+        -p "${PORTFOLIO[@]}" --dims "${DIM}" --cv-mode "${CV_MODE}" --n-epochs 10 --seed "$SEED"
 fi
