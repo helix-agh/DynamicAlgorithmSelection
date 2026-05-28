@@ -17,6 +17,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from tqdm import tqdm
 
 from agents.exponential_das.agent import ExpDASAgent
 from das.env.das_env import DASEnv
@@ -64,7 +65,8 @@ def train(
     episode_rewards: list[float] = []
     best_test_reward = -np.inf
 
-    for ep in range(1, total_episodes + 1):
+    pbar = tqdm(range(1, total_episodes + 1), desc=f"train {name}", unit="ep")
+    for ep in pbar:
         obs, info = train_env.reset()
         done = False
         step_idx = 0
@@ -117,17 +119,22 @@ def train(
             )
             entry["mean_test_reward"] = mean_test_r
             mean_train_r = float(np.mean(episode_rewards[-eval_interval:]))
-            print(
-                f"Ep {ep:5d}/{total_episodes}"
-                f"  train={mean_train_r:.4f}"
-                f"  test={mean_test_r:.4f}"
-                f"  entropy={agent.entropy_coef:.4f}"
-                f"  lr={agent.current_lr:.2e}"
-                f"  kl={agent.last_kl:.4f}"
+            pbar.set_postfix(
+                train=f"{mean_train_r:.4f}",
+                test=f"{mean_test_r:.4f}",
+                ent=f"{agent.entropy_coef:.3f}",
+                kl=f"{agent.last_kl:.4f}",
             )
             if mean_test_r > best_test_reward:
                 best_test_reward = mean_test_r
                 agent.save(os.path.join(save_dir, f"{name}_best.pt"))
+        else:
+            mean_train_r = float(
+                np.mean(episode_rewards[-min(eval_interval, len(episode_rewards)) :])
+            )
+            pbar.set_postfix(
+                train=f"{mean_train_r:.4f}", ent=f"{agent.entropy_coef:.3f}"
+            )
 
         if ep % save_interval == 0:
             ckpt = os.path.join(save_dir, f"{name}_ep{ep}.pt")
@@ -151,7 +158,7 @@ def evaluate(
 ) -> list[dict]:
     """Run the agent deterministically and return per-episode results."""
     results = []
-    for _ in range(n_episodes):
+    for _ in tqdm(range(n_episodes), desc="evaluate", unit="ep", leave=False):
         obs, info = env.reset()
         problem_id = info.get("problem_id", "")
         done = False

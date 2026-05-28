@@ -5,6 +5,7 @@ import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
+from tqdm import tqdm
 
 from das.env.bbob_splits import get_cv_folds, get_train_test_split
 from das.env.das_env import DASEnv
@@ -204,11 +205,15 @@ def run_cv_exp_das(args) -> None:
                 pool.submit(_run_single_fold, fi, all_folds[fi], args): fi
                 for fi in fold_indices
             }
-            for future in as_completed(futures):
+            pbar = tqdm(
+                as_completed(futures), total=len(futures), desc="folds", unit="fold"
+            )
+            for future in pbar:
                 fi, fold_tag, fold_results = future.result()
                 results_by_fold[fi] = (fold_tag, fold_results)
+                pbar.set_postfix(fold=fold_tag)
     else:
-        for fi in fold_indices:
+        for fi in tqdm(fold_indices, desc="folds", unit="fold"):
             print(f"\n{'=' * 60}")
             fi_out, fold_tag, fold_results = _run_single_fold(fi, all_folds[fi], args)
             results_by_fold[fi_out] = (fold_tag, fold_results)

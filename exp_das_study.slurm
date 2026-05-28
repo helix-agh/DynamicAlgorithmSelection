@@ -14,7 +14,7 @@
 SEED=${1:-42}
 
 if [ "$#" -lt 2 ]; then
-    PORTFOLIO=('SPSO' 'IPSO' 'SPSOL')
+    PORTFOLIO=('NM' 'TDE' 'SPSOL')
 else
     PORTFOLIO=("${@:2}")
 fi
