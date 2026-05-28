@@ -31,9 +31,10 @@ def run_rl_das(args) -> None:
         dim=args.dim,
         fe_multiplier=args.fe_multiplier,
         n_checkpoints=args.n_checkpoints,
-        n_individuals=args.n_individuals,
         seed=args.seed,
     )
+    if args.n_individuals is not None:
+        env_kwargs["n_individuals"] = args.n_individuals
     train_env = RLDASEnv(problem_ids=train_ids, **env_kwargs)
     test_env = RLDASEnv(problem_ids=test_ids, **env_kwargs)
 
@@ -99,9 +100,10 @@ def run_cv_rl_das(args) -> None:
         dim=args.dim,
         fe_multiplier=args.fe_multiplier,
         n_checkpoints=args.n_checkpoints,
-        n_individuals=args.n_individuals,
         seed=args.seed,
     )
+    if args.n_individuals is not None:
+        env_kwargs["n_individuals"] = args.n_individuals
 
     fold_summaries = []
 
