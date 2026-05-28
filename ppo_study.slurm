@@ -3,7 +3,7 @@
 #SBATCH --output=logs/ppo_%A_%a.out
 #SBATCH --error=logs/ppo_%A_%a.err
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=1
+#SBATCH --cpus-per-task=3
 #SBATCH --mem=32G
 #SBATCH --time=48:00:00
 #SBATCH --partition=plgrid-gpu-a100
@@ -34,24 +34,24 @@ if [[ $SLURM_ARRAY_TASK_ID -ge 0 && $SLURM_ARRAY_TASK_ID -le 3 ]]; then
     DIM=${DIMS[$SLURM_ARRAY_TASK_ID]}
     echo "PPO | CV-LOIO | dim=$DIM"
     python cv.py ppo ${PORTFOLIO_STR}_PPO_LOIO_DIM${DIM}_SEED${SEED} \
-        -p "${PORTFOLIO[@]}" -d $DIM --cv-mode LOIO --n-epochs 3 --seed $SEED
+        -p "${PORTFOLIO[@]}" -d $DIM --cv-mode LOIO --n-epochs 3 --seed $SEED -j 3
 
 # 4-7: single-dim CV-LOPO
 elif [[ $SLURM_ARRAY_TASK_ID -ge 4 && $SLURM_ARRAY_TASK_ID -le 7 ]]; then
     DIM=${DIMS[$((SLURM_ARRAY_TASK_ID - 4))]}
     echo "PPO | CV-LOPO | dim=$DIM"
     python cv.py ppo ${PORTFOLIO_STR}_PPO_LOPO_DIM${DIM}_SEED${SEED} \
-        -p "${PORTFOLIO[@]}" -d $DIM --cv-mode LOPO --n-epochs 3 --seed $SEED
+        -p "${PORTFOLIO[@]}" -d $DIM --cv-mode LOPO --n-epochs 3 --seed $SEED -j 3
 
 # 8: multi-dim CV-LOIO
 elif [[ $SLURM_ARRAY_TASK_ID -eq 8 ]]; then
     echo "PPO | CV-LOIO | multi-dim"
     python cv.py ppo ${PORTFOLIO_STR}_PPO_LOIO_MULTI_SEED${SEED} \
-        -p "${PORTFOLIO[@]}" -d 2 3 5 10 --cv-mode LOIO --n-epochs 3 --seed $SEED
+        -p "${PORTFOLIO[@]}" -d 2 3 5 10 --cv-mode LOIO --n-epochs 3 --seed $SEED -j 3
 
 # 9: multi-dim CV-LOPO
 elif [[ $SLURM_ARRAY_TASK_ID -eq 9 ]]; then
     echo "PPO | CV-LOPO | multi-dim"
     python cv.py ppo ${PORTFOLIO_STR}_PPO_LOPO_MULTI_SEED${SEED} \
-        -p "${PORTFOLIO[@]}" -d 2 3 5 10 --cv-mode LOPO --n-epochs 3 --seed $SEED
+        -p "${PORTFOLIO[@]}" -d 2 3 5 10 --cv-mode LOPO --n-epochs 3 --seed $SEED -j 3
 fi
