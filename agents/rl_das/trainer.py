@@ -131,8 +131,12 @@ def train(
         # Log per-epoch PPO diagnostics so training instability is visible
         # (e.g. actor_loss explosion, entropy collapse) without manual debugging.
         if epoch_diagnostics:
-            entry["actor_loss"] = float(np.mean([d["actor_loss"] for d in epoch_diagnostics]))
-            entry["critic_loss"] = float(np.mean([d["critic_loss"] for d in epoch_diagnostics]))
+            entry["actor_loss"] = float(
+                np.mean([d["actor_loss"] for d in epoch_diagnostics])
+            )
+            entry["critic_loss"] = float(
+                np.mean([d["critic_loss"] for d in epoch_diagnostics])
+            )
             entry["entropy"] = float(np.mean([d["entropy"] for d in epoch_diagnostics]))
 
         if epoch % eval_interval == 0:

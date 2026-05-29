@@ -24,7 +24,8 @@ def run_rl_das(args) -> None:
 
     # Local variable — avoid mutating args so the caller's namespace stays predictable.
     k_epoch = (
-        args.k_epoch if args.k_epoch is not None
+        args.k_epoch
+        if args.k_epoch is not None
         else max(1, int(0.3 * args.n_checkpoints))
     )
 

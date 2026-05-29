@@ -16,7 +16,7 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 
-from das.env.observation import (compute_observation, observation_dim, MAX_HISTORY_SAMPLE)
+from das.env.observation import compute_observation, observation_dim, MAX_HISTORY_SAMPLE
 from das.env.reward import compute_reward
 from das.optimizers.base import get_checkpoints
 
@@ -257,7 +257,9 @@ class DASEnv(gym.Env):
         # derive scale from the magnitude of the initial best fitness.
         if self._initial_range[0] == float("inf"):
             safe_worst = (
-                worst_y if np.isfinite(worst_y) else new_best_y + max(abs(new_best_y), 1.0)
+                worst_y
+                if np.isfinite(worst_y)
+                else new_best_y + max(abs(new_best_y), 1.0)
             )
             self._initial_range = (new_best_y, max(safe_worst, new_best_y + 1e-5))
 
