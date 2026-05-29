@@ -44,7 +44,7 @@ def reward_sparse(new_best_y, old_best_y, initial_range, is_final=False):
 def reward_binary(new_best_y, old_best_y, initial_range, is_final=False):
     """Binary: 1 if improvement >= 0.1%, else 0 (original r4)."""
     if old_best_y == float("inf"):
-        return float(np.log(initial_range[1] - initial_range[0] + 1e-10))
+        return 0.0
     ratio = _improvement_ratio(new_best_y, old_best_y, initial_range)
     return 1.0 if ratio >= 1e-3 else 0.0
 

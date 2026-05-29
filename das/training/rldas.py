@@ -22,8 +22,12 @@ def run_rl_das(args) -> None:
 
     suite = IOHSuite()
 
-    if args.k_epoch is None:
-        args.k_epoch = max(1, int(0.3 * args.n_checkpoints))
+    # Local variable — avoid mutating args so the caller's namespace stays predictable.
+    k_epoch = (
+        args.k_epoch
+        if args.k_epoch is not None
+        else max(1, int(0.3 * args.n_checkpoints))
+    )
 
     env_kwargs = dict(
         suite=suite,
@@ -45,7 +49,7 @@ def run_rl_das(args) -> None:
     print(
         f"RL-DAS  |  dim={args.dim}  |  portfolio={args.portfolio}"
         f"  |  obs_dim={train_env.observation_space.shape[0]}"
-        f"  |  k_epoch={args.k_epoch}"
+        f"  |  k_epoch={k_epoch}"
     )
 
     train(
@@ -53,7 +57,7 @@ def run_rl_das(args) -> None:
         test_env=test_env,
         agent=agent,
         n_epochs=args.n_epochs,
-        k_epoch=args.k_epoch,
+        k_epoch=k_epoch,
         eval_interval=args.eval_interval,
         save_interval=args.save_interval,
         save_dir="models",
@@ -62,6 +66,17 @@ def run_rl_das(args) -> None:
 
     if args.eval:
         print("\nRunning final evaluation on test set …")
+
+        # Fresh env so _problem_idx starts at 0.  test_env accumulated increments
+        # from periodic evaluations inside train() and would start from a rotated
+        # offset rather than problem 0, making results hard to reproduce.
+        eval_env = RLDASEnv(problem_ids=test_ids, **env_kwargs)
+        n_problems = len(test_ids)
+        test_results = evaluate(eval_env, agent, n_episodes=n_problems)
+
+        # Create the output directory before writing — write_jsonl does not
+        # create parent directories and would raise FileNotFoundError otherwise.
+        os.makedirs("results", exist_ok=True)
         n_problems = len(test_env._problem_ids)
         test_results = evaluate(test_env, agent, n_episodes=n_problems)
         mean_best_y = float(np.mean([r["best_y"] for r in test_results]))

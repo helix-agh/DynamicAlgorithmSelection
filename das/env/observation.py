@@ -124,9 +124,8 @@ def compute_action_history_features(
         last_idx = choices_history[-1]
         last_action[last_idx] = 1.0
 
-        counts = np.array(
-            [choices_history.count(j) for j in range(n_actions)], dtype=np.float32
-        )
+        # O(n) instead of O(n_actions * n_steps) from calling list.count in a loop.
+        counts = np.bincount(choices_history, minlength=n_actions).astype(np.float32)
         frequencies = counts / len(choices_history)
 
         run = 0
