@@ -26,4 +26,4 @@ mkdir -p logs
 
 echo "Exp-DAS | CV-LOIO | dim=2"
 python cv.py exp-das "NM_TDE_SPSOL_EXPDAS_LOIO_2D_SEED42" \
-    -p "${PORTFOLIO[@]}" --dims 2 --cv-mode LOIO --n-epochs 10 --seed "$SEED" --n-jobs 3
+    -p "${PORTFOLIO[@]}" --dims 2 --cv-mode LOIO --n-epochs 3 --seed "$SEED" --n-jobs 3
