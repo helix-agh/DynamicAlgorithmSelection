@@ -59,7 +59,13 @@ FE_MULTIPLIER = (
 N_INDIVIDUALS = 10
 PORTFOLIO = ["SPSO", "IPSO"]
 
-METRICS_KEYS = {"area_under_optimization_curve", "aocc", "final_fitness"}
+METRICS_KEYS = {
+    "area_under_optimization_curve",
+    "aocc",
+    "final_fitness",
+    "hitting_times",
+    "max_fe",
+}
 
 
 def make_env(problem_ids=PROBLEM_IDS, suite=None):
@@ -173,6 +179,36 @@ class TestComputeRunStats:
         history = [(1, 1e8)]
         stats = compute_run_stats(history, 1000, global_minimum=0.0)
         assert stats["aocc"] < 0.1
+
+    def test_fitness_history_fe_increasing_fitness_decreasing(self):
+        # Run a real optimizer on MockProblem with a tiny budget so that
+        # the fitness_history invariant is checked on actual optimizer output.
+        problem = MockProblem("bbob_f001_i01_d02", dim=2)
+        optimizer_class = get_portfolio(["SPSO"])[0]
+        max_fe = 50 * problem.dimension
+        problem_config = {
+            "fitness_function": problem,
+            "ndim_problem": problem.dimension,
+            "lower_boundary": problem.lower_bounds,
+            "upper_boundary": problem.upper_bounds,
+        }
+        options = {
+            "max_function_evaluations": max_fe,
+            "target_fe": max_fe,
+            "n_individuals": 10,
+            "verbose": False,
+        }
+        result = optimizer_class(problem_config, options).optimize()
+        if isinstance(result, tuple):
+            result = result[0]
+        history = result.get("fitness_history", [])
+        assert len(history) > 0, "optimizer produced no fitness_history"
+        fes = [fe for fe, _ in history]
+        fits = [y for _, y in history]
+        assert fes == sorted(fes), "FE counts must be strictly increasing"
+        assert fits == sorted(fits, reverse=True), (
+            "fitness values must be non-increasing"
+        )
 
 
 # ------------------------------------------------------------------ #
@@ -292,7 +328,6 @@ class TestCollectEnvResults:
             suite,
             get_portfolio(PORTFOLIO),
             make_cfg(),
-            {},
         )
         assert len(records) == 2
 
@@ -305,7 +340,6 @@ class TestCollectEnvResults:
             suite,
             get_portfolio(PORTFOLIO),
             make_cfg(),
-            {},
         )
         r = records[0]
         assert len(r) == 1
@@ -322,7 +356,6 @@ class TestCollectEnvResults:
             suite,
             get_portfolio(PORTFOLIO),
             make_cfg(),
-            {},
         )
         metrics = _metrics(records[0])
         assert METRICS_KEYS <= set(metrics.keys())
@@ -336,7 +369,6 @@ class TestCollectEnvResults:
             suite,
             get_portfolio(PORTFOLIO),
             make_cfg(),
-            {},
         )
         for r in records:
             assert 0.0 <= _metrics(r)["aocc"] <= 1.0
@@ -350,7 +382,6 @@ class TestCollectEnvResults:
             suite,
             get_portfolio(PORTFOLIO),
             make_cfg(),
-            {},
         )
         for r in records:
             assert np.isfinite(_metrics(r)["final_fitness"])
@@ -373,7 +404,6 @@ class TestCollectEnvResults:
             suite,
             get_portfolio(PORTFOLIO),
             make_cfg(),
-            {},
         )
         assert _metrics(records[0])["agent"] == "fixed:SPSO"
 
@@ -387,7 +417,6 @@ class TestCollectEnvResults:
             suite,
             get_portfolio(PORTFOLIO),
             make_cfg(),
-            {},
         )
         assert [_pid(r) for r in records] == ids
 
@@ -446,7 +475,6 @@ class TestSingleAlgorithm:
             suite,
             FE_MULTIPLIER,
             N_INDIVIDUALS,
-            {},
         )
         assert len(records) == 2
 
@@ -460,7 +488,6 @@ class TestSingleAlgorithm:
             suite,
             FE_MULTIPLIER,
             N_INDIVIDUALS,
-            {},
         )
         r = records[0]
         metrics = _metrics(r)
@@ -477,7 +504,6 @@ class TestSingleAlgorithm:
             suite,
             FE_MULTIPLIER,
             N_INDIVIDUALS,
-            {},
         )
         for r in records:
             assert 0.0 <= _metrics(r)["aocc"] <= 1.0
@@ -493,7 +519,6 @@ class TestSingleAlgorithm:
             suite,
             FE_MULTIPLIER,
             N_INDIVIDUALS,
-            {},
         )
         fixed_records = collect_env_results(
             "fixed:SPSO",
@@ -502,7 +527,6 @@ class TestSingleAlgorithm:
             suite,
             get_portfolio(PORTFOLIO),
             make_cfg(),
-            {},
         )
         for r in single_records + fixed_records:
             assert np.isfinite(_metrics(r)["final_fitness"])
@@ -600,10 +624,10 @@ class TestComputeOracle:
         optimizers = get_portfolio(PORTFOLIO)
 
         records_spso = collect_env_results(
-            "fixed:SPSO", fixed_policy(0), ids, suite, optimizers, cfg, {}
+            "fixed:SPSO", fixed_policy(0), ids, suite, optimizers, cfg
         )
         records_ipso = collect_env_results(
-            "fixed:IPSO", fixed_policy(1), ids, suite, optimizers, cfg, {}
+            "fixed:IPSO", fixed_policy(1), ids, suite, optimizers, cfg
         )
 
         best, worst = compute_oracle(

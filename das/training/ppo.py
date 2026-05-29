@@ -8,11 +8,11 @@ from tqdm import tqdm
 
 from das.env.bbob_splits import get_cv_folds, get_train_test_split
 from das.optimizers.portfolio import get_portfolio
-from das.training.common import load_global_optima, make_das_env, write_jsonl
+from das.training.common import get_ioh_optimum, make_das_env, write_jsonl
 
 
 def _eval_loop(
-    model, eval_env, problem_ids: list[str], global_optima: dict, desc: str = "eval"
+    model, eval_env, problem_ids: list[str], desc: str = "eval"
 ) -> list[dict]:
     results = []
     for problem_id in tqdm(problem_ids, desc=f"  {desc}", smoothing=0.0):
@@ -25,7 +25,7 @@ def _eval_loop(
             if done[0]:
                 info = infos[0]
         best_y = info.get("best_y", float("inf"))
-        optimum = global_optima.get(problem_id, 0.0)
+        optimum = get_ioh_optimum(problem_id)
         results.append(
             {"problem_id": problem_id, "best_y": best_y, "gap": best_y - optimum}
         )
@@ -155,8 +155,7 @@ def run_ppo(args) -> None:
         model_path = os.path.join("models", args.name)
         model = PPO.load(model_path)
         eval_env = _load_eval_env(model_path, test_ids, optimizers, cfg, args.seed)
-        global_optima = load_global_optima()
-        results = _eval_loop(model, eval_env, test_ids, global_optima)
+        results = _eval_loop(model, eval_env, test_ids)
         eval_env.close()
         out_path = os.path.join("results", f"{args.name}_eval.jsonl")
         write_jsonl(out_path, results)
@@ -181,7 +180,6 @@ def run_cv_ppo(args) -> None:
     print(f"Portfolio : {args.portfolio}")
     print(f"Budget    : {args.fe_multiplier}×dim  |  checkpoints={args.n_checkpoints}")
 
-    global_optima = load_global_optima()
     all_folds = get_cv_folds(
         args.cv_mode, args.dims, seed=args.seed, n_folds=args.n_folds
     )
@@ -220,7 +218,7 @@ def run_cv_ppo(args) -> None:
         else:
             eval_env = _load_eval_env(model_path, test_ids, optimizers, cfg, args.seed)
             fold_results = _eval_loop(
-                model, eval_env, test_ids, global_optima, desc=f"eval {fold_tag}"
+                model, eval_env, test_ids, desc=f"eval {fold_tag}"
             )
             for r in fold_results:
                 r["fold"] = fold_tag

@@ -29,7 +29,7 @@ class DASEnv(gym.Env):
     problem_ids:
         BBOB problem IDs to cycle through (one per episode).
     suite:
-        cocoex Suite object to fetch problems from.
+        IOHSuite (or compatible) object to fetch problems from.
     optimizers:
         Ordered list of sub-optimizer classes (defines the action space).
     fe_multiplier:
@@ -41,7 +41,10 @@ class DASEnv(gym.Env):
     reward_option:
         1=log-scaled, 2=linear, 3=sparse, 4=binary (see das/env/reward.py).
     n_individuals:
-        Population size shared across all sub-optimizers.
+        Population size per sub-optimizer.  ``None`` (default) lets each
+        algorithm use its own built-in default.  Pass a single ``int`` to
+        override all algorithms with the same value, or a list of ``int |
+        None`` with one entry per optimizer for a mixed setup.
     """
 
     metadata = {"render_modes": []}
@@ -55,7 +58,7 @@ class DASEnv(gym.Env):
         n_checkpoints: int = 10,
         checkpoint_division_base: float = 1.0,
         reward_option: int = 1,
-        n_individuals: int = 100,
+        n_individuals: int | list[int | None] | None = None,
         seed: int | None = None,
     ):
         super().__init__()
@@ -66,7 +69,18 @@ class DASEnv(gym.Env):
         self.n_checkpoints = n_checkpoints
         self.cdb = checkpoint_division_base
         self.reward_option = reward_option
-        self.n_individuals = n_individuals
+        n_opt = len(optimizers)
+        if n_individuals is None or isinstance(n_individuals, int):
+            self.n_individuals: list[int | None] = [n_individuals] * n_opt
+        else:
+            pop = list(n_individuals)
+            if len(pop) == 1:
+                pop = pop * n_opt
+            if len(pop) != n_opt:
+                raise ValueError(
+                    f"n_individuals has {len(pop)} entries but portfolio has {n_opt}"
+                )
+            self.n_individuals = pop
         self._seed = seed
 
         n_actions = len(optimizers)
@@ -109,8 +123,9 @@ class DASEnv(gym.Env):
         self._problem = self.suite.get_problem(problem_id)
         dim = self._problem.dimension
         self._max_fe = self.fe_multiplier * dim
+        known = [n for n in self.n_individuals if n is not None]
         self._checkpoints = get_checkpoints(
-            self.n_checkpoints, self._max_fe, self.n_individuals, self.cdb
+            self.n_checkpoints, self._max_fe, max(known) if known else 1, self.cdb
         )
 
         # Reset episode bookkeeping
@@ -175,13 +190,15 @@ class DASEnv(gym.Env):
             "lower_boundary": self._problem.lower_bounds,
             "upper_boundary": self._problem.upper_bounds,
         }
+        n_ind = self.n_individuals[action]
         options = {
             "max_function_evaluations": self._max_fe,
             "target_fe": target_fe,
-            "n_individuals": self.n_individuals,
             "best_so_far_y": self._best_y,
             "verbose": False,
         }
+        if n_ind is not None:
+            options["n_individuals"] = n_ind
         # Derive a deterministic seed for pypop7's default_rng, which is
         # independent of np.random and must be seeded explicitly.
         if self._seed is not None:
@@ -210,9 +227,14 @@ class DASEnv(gym.Env):
         else:
             # Fallback: carry x/y from the population history
             if len(optimizer.x_history) > 0:
+                x_hist = optimizer.x_history
+                y_hist = optimizer.y_history
+                if n_ind is not None:
+                    x_hist = x_hist[-n_ind:]
+                    y_hist = y_hist[-n_ind:]
                 self._optimizer_state = {
-                    "x": np.array(optimizer.x_history[-self.n_individuals :]),
-                    "y": np.array(optimizer.y_history[-self.n_individuals :]),
+                    "x": np.array(x_hist),
+                    "y": np.array(y_hist),
                 }
 
         return result

@@ -36,15 +36,20 @@ import json
 import os
 import warnings
 
-import cocoex
 import numpy as np
 from tqdm import tqdm
 
 from das.env.das_env import DASEnv
+from das.env.ioh_suite import IOHSuite
 from das.optimizers.portfolio import get_portfolio
 from das.utils import set_seed
 from das.env.bbob_splits import ALL_DIMS, get_train_test_split
-from das.training.common import compute_run_stats, load_global_optima
+from das.training.common import (
+    compute_run_stats,
+    get_ioh_optimum,
+    ERT_TARGETS,
+    _ert_key,
+)
 
 warnings.filterwarnings("ignore")
 
@@ -95,7 +100,6 @@ def collect_env_results(
     suite,
     optimizers: list,
     cfg: dict,
-    global_optima: dict[str, float],
 ) -> list[dict]:
     """Run policy_fn on every problem in test_ids via DASEnv."""
     env = DASEnv(
@@ -112,7 +116,7 @@ def collect_env_results(
     for problem_id in tqdm(test_ids, desc=f"  {agent_tag}", smoothing=0.0):
         step_info, fitness_history = run_episode(env, policy_fn)
         max_fe = step_info.get("n_fe", 0)
-        global_minimum = global_optima.get(problem_id, 0.0)
+        global_minimum = get_ioh_optimum(problem_id)
         stats = compute_run_stats(fitness_history, max_fe, global_minimum)
         results.append({problem_id: {**stats, "agent": agent_tag}})
     env.close()
@@ -164,13 +168,12 @@ def collect_single_results(
     suite,
     fe_multiplier: int,
     n_individuals: int,
-    global_optima: dict[str, float],
 ) -> list[dict]:
     """Run the optimizer independently on every problem in test_ids."""
     results = []
     for problem_id in tqdm(test_ids, desc=f"  {agent_tag}", smoothing=0.0):
         problem = suite.get_problem(problem_id)
-        global_minimum = global_optima.get(problem_id, 0.0)
+        global_minimum = get_ioh_optimum(problem_id)
         stats = run_single_algorithm(
             optimizer_class, problem, fe_multiplier, n_individuals, global_minimum
         )
@@ -212,6 +215,8 @@ def compute_oracle(all_results: dict[str, list[dict]]) -> tuple[list[dict], list
                     ],
                     "aocc": best_m["aocc"],
                     "final_fitness": best_m["final_fitness"],
+                    "hitting_times": best_m.get("hitting_times", {}),
+                    "max_fe": best_m.get("max_fe", 0),
                     "agent": "oracle-best",
                     "best_agent": best_m["agent"],
                 }
@@ -225,6 +230,8 @@ def compute_oracle(all_results: dict[str, list[dict]]) -> tuple[list[dict], list
                     ],
                     "aocc": worst_m["aocc"],
                     "final_fitness": worst_m["final_fitness"],
+                    "hitting_times": worst_m.get("hitting_times", {}),
+                    "max_fe": worst_m.get("max_fe", 0),
                     "agent": "oracle-worst",
                     "worst_agent": worst_m["agent"],
                 }
@@ -241,12 +248,29 @@ def compute_oracle(all_results: dict[str, list[dict]]) -> tuple[list[dict], list
 # ------------------------------------------------------------------ #
 
 
+def _ert_for_target(records: list[dict], target_key: str) -> float | None:
+    """ERT = total_FEs / n_successful_runs (unsuccessful runs contribute max_fe)."""
+    total_fe = 0
+    n_succ = 0
+    for r in records:
+        m = next(iter(r.values()))
+        ht = m.get("hitting_times", {}).get(target_key)
+        mfe = m.get("max_fe", 0)
+        if ht is not None:
+            total_fe += ht
+            n_succ += 1
+        else:
+            total_fe += mfe
+    return float(total_fe / n_succ) if n_succ > 0 else None
+
+
 def summarise(tag: str, records: list[dict]) -> dict:
     fitnesses = [next(iter(r.values()))["final_fitness"] for r in records]
     aocc_vals = [next(iter(r.values()))["aocc"] for r in records]
     auoc_vals = [
         next(iter(r.values()))["area_under_optimization_curve"] for r in records
     ]
+    ert = {_ert_key(t): _ert_for_target(records, _ert_key(t)) for t in ERT_TARGETS}
     return {
         "agent": tag,
         "n_problems": len(fitnesses),
@@ -256,6 +280,7 @@ def summarise(tag: str, records: list[dict]) -> dict:
         "worst_final_fitness": float(np.max(fitnesses)),
         "mean_aocc": float(np.mean(aocc_vals)),
         "mean_auoc": float(np.mean(auoc_vals)),
+        "ert": ert,
     }
 
 
@@ -266,16 +291,23 @@ def save_results(records: list[dict], path: str) -> None:
 
 
 def print_summary(summaries: list[dict]) -> None:
+    _ERT_PRINT_TARGET = "1e-04"
     width = max(len(s["agent"]) for s in summaries) + 2
-    header = f"  {'Agent':<{width}}  {'Mean fitness':>14}  {'Median fitness':>14}  {'Mean AUOC':>14}"
+    header = (
+        f"  {'Agent':<{width}}  {'Mean fitness':>14}  {'Median fitness':>14}"
+        f"  {'Mean AUOC':>14}  {'ERT(1e-04)':>12}"
+    )
     print(header)
     print("  " + "-" * (len(header) - 2))
     for s in summaries:
+        ert_val = s.get("ert", {}).get(_ERT_PRINT_TARGET)
+        ert_str = f"{ert_val:>12.1f}" if ert_val is not None else f"{'inf':>12}"
         print(
             f"  {s['agent']:<{width}}  "
             f"{s['mean_final_fitness']:>14.4e}  "
             f"{s['median_final_fitness']:>14.4e}  "
-            f"{s['mean_auoc']:>14.4e}"
+            f"{s['mean_auoc']:>14.4e}  "
+            f"{ert_str}"
         )
 
 
@@ -317,7 +349,7 @@ def parse_args():
     p.add_argument("-s", "--n-checkpoints", type=int, default=10)
     p.add_argument("-x", "--cdb", type=float, default=1.0)
     p.add_argument("-O", "--reward-option", type=int, default=1, choices=[1, 2, 3, 4])
-    p.add_argument("-n", "--n-individuals", type=int, default=100)
+    p.add_argument("-n", "--n-individuals", type=int, default=None)
     p.add_argument("--seed", type=int, default=42)
     return p.parse_args()
 
@@ -334,11 +366,8 @@ def main():
 
     optimizers = get_portfolio(args.portfolio)
     opt_names = args.portfolio
-    cocoex.utilities.MiniPrint()
-    suite = cocoex.Suite("bbob", "", "")
+    suite = IOHSuite()
     _, test_ids = get_train_test_split(args.mode, args.dims)
-    global_optima = load_global_optima()
-
     cfg = {
         "fe_multiplier": args.fe_multiplier,
         "n_checkpoints": args.n_checkpoints,
@@ -384,7 +413,7 @@ def main():
 
         if tag == "random":
             records = collect_env_results(
-                tag, random_policy, test_ids, suite, optimizers, cfg, global_optima
+                tag, random_policy, test_ids, suite, optimizers, cfg
             )
 
         elif tag.startswith("fixed:"):
@@ -402,7 +431,6 @@ def main():
                 suite,
                 optimizers,
                 cfg,
-                global_optima,
             )
 
         elif tag.startswith("single:"):
@@ -415,7 +443,6 @@ def main():
                 suite,
                 args.fe_multiplier,
                 args.n_individuals,
-                global_optima,
             )
 
         else:

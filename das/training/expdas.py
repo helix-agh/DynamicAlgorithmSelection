@@ -4,14 +4,14 @@ import json
 import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-import cocoex as cx
 import numpy as np
+from tqdm import tqdm
 
 from das.env.bbob_splits import get_cv_folds, get_train_test_split
 from das.env.das_env import DASEnv
 from das.env.observation import observation_dim
 from das.optimizers.portfolio import get_portfolio
-from das.training.common import load_global_optima, write_jsonl
+from das.training.common import write_jsonl
 
 
 def run_exp_das(args) -> None:
@@ -30,7 +30,9 @@ def run_exp_das(args) -> None:
         f"  n_epochs={args.n_epochs}  total_episodes={total_episodes}"
     )
 
-    suite = cx.Suite("bbob", "", "")
+    from das.env.ioh_suite import IOHSuite
+
+    suite = IOHSuite()
 
     env_cfg = dict(
         suite=suite,
@@ -77,12 +79,10 @@ def run_exp_das(args) -> None:
 
     if args.eval:
         print("\nFinal evaluation on test set …")
-        global_optima = load_global_optima()
         test_results = evaluate(
             test_env,
             agent,
             n_episodes=min(len(test_ids), 50),
-            global_optima=global_optima,
         )
         mean_final_fitness = float(
             np.mean([next(iter(r.values()))["final_fitness"] for r in test_results])
@@ -98,13 +98,13 @@ def _run_single_fold(
 ) -> tuple[int, str, list[dict]]:
     """Train and evaluate one CV fold.  Safe to call in a subprocess.
 
-    Each call creates its own cocoex Suite so the (non-picklable) Suite object
-    never crosses process boundaries.
+    Each call creates its own IOHSuite so no shared mutable state crosses
+    process boundaries.
 
     Returns (fold_idx, fold_tag, fold_results).
     """
     # Lazy imports so the function can be pickled by ProcessPoolExecutor.
-    import cocoex as _cx
+    from das.env.ioh_suite import IOHSuite as _IOHSuite
     from agents.exponential_das import ExpDASAgent
     from agents.exponential_das import train as _train, evaluate as _evaluate
 
@@ -121,7 +121,7 @@ def _run_single_fold(
     obs_dim = observation_dim(n_opt)
     buffer_capacity = args.buffer_capacity or (16 * args.n_checkpoints)
 
-    suite = _cx.Suite("bbob", "", "")
+    suite = _IOHSuite()
     env_cfg = dict(
         suite=suite,
         optimizers=optimizers,
@@ -167,11 +167,8 @@ def _run_single_fold(
         with open(result_path) as fh:
             fold_results = [json.loads(line) for line in fh]
     else:
-        global_optima = load_global_optima()
         eval_env = DASEnv(problem_ids=test_ids, **env_cfg)
-        raw = _evaluate(
-            eval_env, agent, n_episodes=len(test_ids), global_optima=global_optima
-        )
+        raw = _evaluate(eval_env, agent, n_episodes=len(test_ids))
         fold_results = [
             {pid: {**m, "fold": fold_tag}} for r in raw for pid, m in r.items()
         ]
@@ -208,11 +205,15 @@ def run_cv_exp_das(args) -> None:
                 pool.submit(_run_single_fold, fi, all_folds[fi], args): fi
                 for fi in fold_indices
             }
-            for future in as_completed(futures):
+            pbar = tqdm(
+                as_completed(futures), total=len(futures), desc="folds", unit="fold"
+            )
+            for future in pbar:
                 fi, fold_tag, fold_results = future.result()
                 results_by_fold[fi] = (fold_tag, fold_results)
+                pbar.set_postfix(fold=fold_tag)
     else:
-        for fi in fold_indices:
+        for fi in tqdm(fold_indices, desc="folds", unit="fold"):
             print(f"\n{'=' * 60}")
             fi_out, fold_tag, fold_results = _run_single_fold(fi, all_folds[fi], args)
             results_by_fold[fi_out] = (fold_tag, fold_results)

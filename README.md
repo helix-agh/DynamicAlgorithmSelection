@@ -302,14 +302,65 @@ Submit all agents for a given seed and portfolio:
 bash runner.sh
 ```
 
-Individual SLURM scripts:
+Each script accepts positional arguments: `SEED [PORTFOLIO...]` (RL-DAS takes only `SEED`).
 
-| Script | Agent |
-|---|---|
-| `ppo_study.slurm` | PPO |
-| `rl_das_study.slurm` | RL-DAS |
-| `exp_das_study.slurm` | Exp-DAS |
-| `baselines.slurm` | Baselines |
+```bash
+sbatch baselines.slurm       42 CPSO NM TDE
+sbatch ppo_study.slurm       42 CPSO NM TDE
+sbatch rl_das_study.slurm    42
+sbatch exp_das_study.slurm   42 CPSO NM TDE
+```
+
+### `baselines.slurm`
+
+Single job (no array). Runs all baseline agent types (`random`, `fixed:*`, `single:*`, oracle) across all dimensions.
+
+### `ppo_study.slurm` — array 0–9
+
+| Task | CV mode | Dimensions |
+|------|---------|------------|
+| 0 | LOIO | 2 |
+| 1 | LOIO | 3 |
+| 2 | LOIO | 5 |
+| 3 | LOIO | 10 |
+| 4 | LOPO | 2 |
+| 5 | LOPO | 3 |
+| 6 | LOPO | 5 |
+| 7 | LOPO | 10 |
+| 8 | LOIO | 2, 3, 5, 10 (multi-dim) |
+| 9 | LOPO | 2, 3, 5, 10 (multi-dim) |
+
+### `rl_das_study.slurm` — array 0–7
+
+Fixed DE portfolio (`NL_SHADE_RSP / MADDE / JDE21`). One model per dimension.
+
+| Task | CV mode | Dimension |
+|------|---------|-----------|
+| 0 | LOIO | 2 |
+| 1 | LOIO | 3 |
+| 2 | LOIO | 5 |
+| 3 | LOIO | 10 |
+| 4 | LOPO | 2 |
+| 5 | LOPO | 3 |
+| 6 | LOPO | 5 |
+| 7 | LOPO | 10 |
+
+### `exp_das_study.slurm` — array 0–11
+
+| Task | CV mode | Dimensions |
+|------|---------|------------|
+| 0 | LOIO | 2, 5, 10 (multi-dim) |
+| 1 | LOPO | 2, 5, 10 (multi-dim) |
+| 2 | LOIO | 2, 3, 5, 10 (multi-dim) |
+| 3 | LOPO | 2, 3, 5, 10 (multi-dim) |
+| 4 | LOIO | 2 |
+| 5 | LOPO | 2 |
+| 6 | LOIO | 3 |
+| 7 | LOPO | 3 |
+| 8 | LOIO | 5 |
+| 9 | LOPO | 5 |
+| 10 | LOIO | 10 |
+| 11 | LOPO | 10 |
 
 ---
 

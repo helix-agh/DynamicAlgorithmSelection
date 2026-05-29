@@ -71,7 +71,12 @@ def _add_shared_args(
         default=10,
         help="Optimizer-selection steps per episode",
     )
-    p.add_argument("--n-individuals", type=int, default=100, help="Population size")
+    p.add_argument(
+        "--n-individuals",
+        type=int,
+        default=None,
+        help="Population size override (default: each algorithm uses its own built-in default)",
+    )
     p.add_argument("--seed", type=int, default=42)
 
 
@@ -159,7 +164,7 @@ def _parse_args() -> argparse.Namespace:
     rl.set_defaults(
         eval=True,
         portfolio=["NL_SHADE_RSP", "MADDE", "JDE21"],
-        n_individuals=170,
+        n_individuals=None,
     )
 
     # ---- Exp-DAS ----------------------------------------------------

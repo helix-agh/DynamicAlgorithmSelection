@@ -10,7 +10,7 @@ from das.training.common import write_jsonl
 
 
 def run_rl_das(args) -> None:
-    import cocoex as cx
+    from das.env.ioh_suite import IOHSuite
     from agents.rl_das import RLDASEnv, PPOAgent
     from agents.rl_das import train, evaluate
     from agents.rl_das.optimizers import get_rldas_portfolio
@@ -20,7 +20,7 @@ def run_rl_das(args) -> None:
     train_ids, test_ids = get_train_test_split(args.mode, [args.dim])
     print(f"Train: {len(train_ids)} problems  |  Test: {len(test_ids)} problems")
 
-    suite = cx.Suite("bbob", "", "")
+    suite = IOHSuite()
 
     if args.k_epoch is None:
         args.k_epoch = max(1, int(0.3 * args.n_checkpoints))
@@ -31,9 +31,10 @@ def run_rl_das(args) -> None:
         dim=args.dim,
         fe_multiplier=args.fe_multiplier,
         n_checkpoints=args.n_checkpoints,
-        n_individuals=args.n_individuals,
         seed=args.seed,
     )
+    if args.n_individuals is not None:
+        env_kwargs["n_individuals"] = args.n_individuals
     train_env = RLDASEnv(problem_ids=train_ids, **env_kwargs)
     test_env = RLDASEnv(problem_ids=test_ids, **env_kwargs)
 
@@ -71,14 +72,14 @@ def run_rl_das(args) -> None:
 
 
 def run_cv_rl_das(args) -> None:
-    import cocoex as cx
+    from das.env.ioh_suite import IOHSuite
     from agents.rl_das import RLDASEnv, PPOAgent
     from agents.rl_das import train, evaluate
     from agents.rl_das.optimizers import get_rldas_portfolio
 
     optimizers = get_rldas_portfolio(args.portfolio)
 
-    suite = cx.Suite("bbob", "", "")
+    suite = IOHSuite()
 
     if args.k_epoch is None:
         args.k_epoch = max(1, int(0.3 * args.n_checkpoints))
@@ -99,9 +100,10 @@ def run_cv_rl_das(args) -> None:
         dim=args.dim,
         fe_multiplier=args.fe_multiplier,
         n_checkpoints=args.n_checkpoints,
-        n_individuals=args.n_individuals,
         seed=args.seed,
     )
+    if args.n_individuals is not None:
+        env_kwargs["n_individuals"] = args.n_individuals
 
     fold_summaries = []
 
