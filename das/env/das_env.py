@@ -39,7 +39,8 @@ class DASEnv(gym.Env):
     checkpoint_division_base (cdb):
         cdb=1.0 → uniform checkpoints; cdb>1.0 → exponentially growing intervals.
     reward_option:
-        1=log-scaled, 2=linear, 3=sparse, 4=binary (see das/env/reward.py).
+        1=log-scaled, 2=linear, 3=sparse, 4=binary, 5=hybrid-sign
+        (see das/env/reward.py).
     n_individuals:
         Population size per sub-optimizer.  ``None`` (default) lets each
         algorithm use its own built-in default.  Pass a single ``int`` to
@@ -107,6 +108,7 @@ class DASEnv(gym.Env):
         self._best_x: np.ndarray | None = None
         self._worst_y = -np.inf
         self._initial_range: tuple[float, float] = (float("inf"), -np.inf)
+        self._optimum: float | None = None
         self._stagnation_count = 0
         self._choices_history: list[int] = []
 
@@ -121,6 +123,9 @@ class DASEnv(gym.Env):
         self._problem_idx += 1
 
         self._problem = self.suite.get_problem(problem_id)
+        # Known global minimum, used only by optimum-aware reward options
+        # (training-only signal); None on suites that do not expose it.
+        self._optimum = getattr(self._problem, "optimum", None)
         dim = self._problem.dimension
         self._max_fe = self.fe_multiplier * dim
         known = [n for n in self.n_individuals if n is not None]
@@ -129,17 +134,45 @@ class DASEnv(gym.Env):
         )
 
         # Reset episode bookkeeping
-        self._n_fe = 0
         self._checkpoint_idx = 0
         self._optimizer_state = {}
         self._x_history = None
         self._y_history = None
-        self._best_y = float("inf")
-        self._best_x = None
-        self._worst_y = -np.inf
-        self._initial_range = (float("inf"), -np.inf)
         self._stagnation_count = 0
         self._choices_history = []
+
+        # Agent-independent reference via a random probe.  Establishing best/
+        # scale *before* the agent acts removes the reward-hacking incentive to
+        # pick a bad first optimizer just to inflate later improvement: the
+        # episode return telescopes to (probe_best - best_final) / scale, whose
+        # reference no longer depends on the agent's first action.  Uses random
+        # sampling only, so it generalises to real problems.
+        lb, ub = self._problem.lower_bounds, self._problem.upper_bounds
+        rng = np.random.default_rng(
+            None
+            if self._seed is None
+            else (self._seed * 1_000_000 + self._problem_idx * 1_000) % (2**31)
+        )
+        # Cap so the probe never consumes the whole first checkpoint's budget.
+        n_probe = min(max(2 * dim, 50), max(int(self._checkpoints[0]) - dim, dim + 1))
+        x_probe = rng.uniform(lb, ub, size=(n_probe, dim))
+        y_probe = np.array([self._problem(x) for x in x_probe], dtype=float)
+        i_best = int(np.argmin(y_probe))
+
+        self._best_y = float(y_probe[i_best])
+        self._best_x = x_probe[i_best]
+        self._worst_y = float(y_probe.max())
+        # Robust reward scale: the upper end of the range is the *median* of the
+        # probe, not its max.  ``max`` of a uniform sample is the noisiest
+        # possible statistic — driven by a single outlier — so it makes the scale
+        # (and therefore every reward) jitter across seeds for the same run.  The
+        # median is stable and also shrinks the scale toward the typical objective
+        # spread, which improves reward resolution during late-stage refinement
+        # near the optimum (a max-based linear scale spends ~all its range on the
+        # first easy descent out of the random region).
+        robust_upper = float(np.median(y_probe))
+        self._initial_range = (self._best_y, max(robust_upper, self._best_y + 1e-5))
+        self._n_fe = n_probe
 
         obs = self._build_observation()
         info = {"problem_id": problem_id, "dimension": dim}
@@ -166,6 +199,7 @@ class DASEnv(gym.Env):
             self._initial_range,
             option=self.reward_option,
             is_final=terminated,
+            optimum=self._optimum,
         )
 
         obs = self._build_observation()
@@ -251,17 +285,10 @@ class DASEnv(gym.Env):
         if worst_y > self._worst_y:
             self._worst_y = worst_y
 
-        # Set initial range on first step.
-        # When worst_so_far_y is absent the default is -inf, which collapses
-        # scale to 1e-5 and inflates every subsequent reward by 1e5.  Instead,
-        # derive scale from the magnitude of the initial best fitness.
-        if self._initial_range[0] == float("inf"):
-            safe_worst = (
-                worst_y
-                if np.isfinite(worst_y)
-                else new_best_y + max(abs(new_best_y), 1.0)
-            )
-            self._initial_range = (new_best_y, max(safe_worst, new_best_y + 1e-5))
+        # NOTE: ``_initial_range`` (the reward reference and scale) is fixed in
+        # reset() from an agent-independent random probe, so it is intentionally
+        # not updated here — that is what prevents reward hacking on the first
+        # optimizer choice.
 
         # Stagnation counter — prefer the FE delta from the result dict so that
         # stagnation accumulates correctly even when y_history is not returned.
