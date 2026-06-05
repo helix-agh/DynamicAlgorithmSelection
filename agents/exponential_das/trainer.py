@@ -77,10 +77,9 @@ def train(
             next_obs, reward, terminated, truncated, step_info = train_env.step(action)
             done = terminated or truncated
 
-            # Reward normalisation (update only during warmup)
-            normed_reward = agent.rew_norm.normalize(
-                reward, step_idx, update=not agent.buffer.warmed_up
-            )
+            # Reward normalisation: always update so stats track the shifting
+            # reward distribution as the agent improves (matches reference).
+            normed_reward = agent.rew_norm.normalize(reward, step_idx, update=True)
             ep_reward += reward
 
             agent.buffer.add(obs, action, log_prob, value, normed_reward, done)

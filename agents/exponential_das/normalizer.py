@@ -1,9 +1,14 @@
 """Running normalizers for observations and rewards.
 
 Both use Welford's online algorithm for numerically stable mean/variance.
-Normalisation is only updated during the warmup phase (while the buffer is
-filling for the first time); afterwards the statistics are frozen.  This
-mirrors the StateNormalizer behaviour in the source project.
+
+ObservationNormalizer statistics are frozen after the warmup phase (first
+buffer fill) so the obs space presented to the actor/critic networks stays
+stable.
+
+RewardNormalizer keeps updating throughout training so that its per-step
+statistics track the shifting reward distribution as the agent improves.
+This matches the StepwiseRewardNormalizer behaviour in the reference project.
 """
 
 from __future__ import annotations
