@@ -96,26 +96,35 @@ def reward_hybrid_binary(new_best_y, old_best_y, initial_range, is_final=False, 
 
 # Probably the best
 def reward_hybrid_sign(new_best_y, old_best_y, initial_range, is_final=False, optimum=None):
-    """Hybrid B: dense progress signal + full-magnitude terminal reward.
-
-    Aggressive variant: higher base rewards, tighter threshold, stronger penalty.
-    - Threshold 0.5% (step_ratio > scale * 5e-3) filters micro-steps
-    - Reward range [0.1, 1.1]: large steps worth significantly more
-    - Penalty -0.15 decayed: stronger motivation to keep searching
-    """
+    """Hybrid B: dense progress signal + full-magnitude terminal reward."""
     if is_final:
         return _terminal_reward(new_best_y, initial_range, optimum)
 
-    scale = initial_range[1] - initial_range[0]
-    step_ratio = _improvement_ratio(new_best_y, old_best_y, initial_range)
-    if step_ratio > scale * 5e-3:
-        return float(0.1 + 1.0 * np.clip(step_ratio, 0.0, 1.0))
+    base, slope, penalty = 0.1, 1.0, 0.15
 
     if optimum is not None:
-        progress = max(_log_gap_orders(initial_range[0], new_best_y, optimum), 0.0)
+        step_threshold = 0.05
+
+        def gain(y_from, y_to):
+            return _log_gap_orders(y_from, y_to, optimum)
     else:
-        progress = max(_improvement_ratio(new_best_y, initial_range[0], initial_range), 0.0)
-    return float(-0.15 / (1.0 + progress))
+        step_threshold = 5e-3
+
+        def gain(y_from, y_to):
+            return _improvement_ratio(y_to, y_from, initial_range)
+
+    step_gain = gain(old_best_y, new_best_y)
+    if step_gain > step_threshold:
+        return float(base + slope * np.clip(step_gain, 0.0, 1.0))
+
+    # Already at the precision target: a stalled step is the goal state, not
+    # stagnation, so don't penalise it (otherwise solving early is discouraged).
+    if optimum is not None and (new_best_y - optimum) <= _GAP_FLOOR:
+        return 0.0
+
+    progress = max(gain(initial_range[0], new_best_y), 0.0)
+    shortfall = 1.0 - np.clip(step_gain / step_threshold, 0.0, 1.0)
+    return float(-penalty * shortfall**2 / (1.0 + progress))
 
 
 REWARD_FNS = {
