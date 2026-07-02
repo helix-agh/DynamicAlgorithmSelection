@@ -36,13 +36,7 @@ def _log_gap_orders(y_from: float, y_to: float, optimum: float) -> float:
 
 
 def _terminal_reward(final_y, initial_range, optimum) -> float:
-    """Full-magnitude terminal reward, clipped to [-10, 10].
-
-    With a known optimum: orders of magnitude of accuracy gained relative to the
-    random-probe baseline — this does *not* saturate, so reaching gap 1e-8 is
-    rewarded far more than gap 1e-2 (the probe-scaled version cannot tell them
-    apart). Otherwise: probe-scaled total improvement (legacy behaviour).
-    """
+    """Full-magnitude terminal reward, clipped to [-10, 10]."""
     if optimum is not None:
         return float(np.clip(_log_gap_orders(initial_range[0], final_y, optimum), -10.0, 10.0))
     raw = _improvement_ratio(final_y, initial_range[0], initial_range)
@@ -91,7 +85,7 @@ def reward_hybrid_binary(new_best_y, old_best_y, initial_range, is_final=False, 
     if is_final:
         return _terminal_reward(new_best_y, initial_range, optimum)
     ratio = _improvement_ratio(new_best_y, old_best_y, initial_range)
-    return 0.1 if ratio > 1e-8 else 0
+    return 0.1 if ratio > 1e-8 else 0.0
 
 
 # Probably the best
@@ -117,8 +111,6 @@ def reward_hybrid_sign(new_best_y, old_best_y, initial_range, is_final=False, op
     if step_gain > step_threshold:
         return float(base + slope * np.clip(step_gain, 0.0, 1.0))
 
-    # Already at the precision target: a stalled step is the goal state, not
-    # stagnation, so don't penalise it (otherwise solving early is discouraged).
     if optimum is not None and (new_best_y - optimum) <= _GAP_FLOOR:
         return 0.0
 
