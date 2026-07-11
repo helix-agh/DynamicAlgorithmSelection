@@ -41,6 +41,11 @@ class IOHProblemWrapper:
     def upper_bounds(self) -> np.ndarray:
         return np.asarray(self._p.bounds.ub, dtype=np.float64)
 
+    @property
+    def optimum(self) -> float:
+        """Known global minimum (objective value) of the problem."""
+        return float(self._p.optimum.y)
+
     def __call__(self, x) -> float:
         return float(self._p(x))
 

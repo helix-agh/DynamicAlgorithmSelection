@@ -370,6 +370,7 @@ class TestEnvContractHeterogeneous:
         env.reset()
         drain(env)
         env.reset()
-        assert env._n_fe == 0
-        assert env._best_y == float("inf")
+        # reset() runs a random probe, so _n_fe > 0 and _best_y is finite
+        assert env._n_fe > 0
+        assert np.isfinite(env._best_y)
         assert env._optimizer_state == {}

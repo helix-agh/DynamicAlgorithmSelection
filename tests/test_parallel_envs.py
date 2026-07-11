@@ -169,8 +169,9 @@ class TestSingleEnv:
         env.step(0)
         env.step(0)  # mid-episode
         env.reset()  # full reset
-        assert env._n_fe == 0
-        assert env._best_y == float("inf")
+        # reset() runs a random probe, so _n_fe > 0 and _best_y is finite
+        assert env._n_fe > 0
+        assert np.isfinite(env._best_y)
         assert env._checkpoint_idx == 0
         assert env._choices_history == []
         assert env._optimizer_state == {}
@@ -202,10 +203,11 @@ class TestEnvIsolation:
         env_b = make_env(suite=suite)
         env_a.reset()
         env_b.reset()
+        best_y_before = env_b._best_y  # probe value set during reset
 
         env_a.step(0)
 
-        assert env_b._best_y == float("inf")
+        assert env_b._best_y == best_y_before
 
     def test_optimizer_state_does_not_leak(self):
         """Warm-start population in env_a must not appear in env_b."""
